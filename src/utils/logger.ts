@@ -1,6 +1,7 @@
 import chalk, { type ChalkInstance } from "chalk";
 import { appendFileSync, existsSync, mkdirSync, createWriteStream, type WriteStream } from "fs";
 import { dirname } from "path";
+import { config } from "@/config";
 
 export type LogLevel = "debug" | "info" | "success" | "warn" | "error" | "fatal";
 

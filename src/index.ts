@@ -3,8 +3,8 @@ import { Command } from "commander";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { logger } from "./utils/logger.js";
-import { greet } from "./commands/greet.js";
+import { logger } from "@/utils/logger";
+import { greet } from "@/commands/greet";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
