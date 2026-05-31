@@ -20,6 +20,7 @@
     "@openrouter/sdk": "^0.12.79",
     "chalk": "^5.6.2",
     "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
     "identitydb": "^0.5.0",
     "ora": "^9.4.0"
   }
