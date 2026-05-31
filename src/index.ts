@@ -4,7 +4,8 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { logger } from "@/utils/logger";
-import { greet } from "@/commands/greet";
+import { run } from "@/commands/run";
+import { brain } from "@/commands/brain";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -19,32 +20,24 @@ function getVersion(): string {
   }
 }
 
-function run(argv: string[] = process.argv) {
-  const program = new Command();
+const argv = process.argv;
+const program = new Command();
 
-  program
-    .name("brainbox")
-    .description("A CLI tool for brainbox")
-    .version(getVersion(), "-v, --version", "Display version number")
-    .helpOption("-h, --help", "Display help for command")
-    .configureOutput({
-      outputError: (str) => logger.error(str.replace("error: ", "")),
-    });
-
-  program
-    .command("greet")
-    .description("Greet someone")
-    .argument("<name>", "Name to greet")
-    .option("-u, --uppercase", "Convert greeting to uppercase")
-    .option("-c, --count <number>", "Repeat the greeting", "1")
-    .action(greet);
-
-  program.on("command:*", () => {
-    logger.error(`Unknown command: ${program.args.join(" ")}`);
-    program.help();
+program
+  .name("brainbox")
+  .description("A CLI tool for brainbox")
+  .version(getVersion(), "-v, --version", "Display version number")
+  .helpOption("-h, --help", "Display help for command")
+  .configureOutput({
+    outputError: (str) => logger.error(str.replace("error: ", "")),
   });
 
-  program.parse(argv);
-}
+program.command("run").description("Run BrainBox").action(run);
+program.command("brain").description("Manage brains").action(brain);
 
-run();
+program.on("command:*", () => {
+  logger.error(`Unknown command: ${program.args.join(" ")}`);
+  program.help();
+});
+
+program.parse(argv);
