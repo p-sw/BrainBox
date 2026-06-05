@@ -3,16 +3,242 @@ import { config } from "@/config";
 import { IdentityDB, type Space } from "identitydb";
 import { llm } from "@/openrouter";
 import { loadPrompt } from "@/openrouter/promptLoader";
+import {
+  availabilitySchema,
+  dailyScheduleSchema,
+  monthlyScheduleSchema,
+} from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
 import { factExtractor } from "./factExtractor";
 import { brainManager, type BrainItem } from "./manager";
+import {
+  type Availability,
+  type DailySchedule,
+  type MonthlySchedule,
+  formatDateKey,
+  formatMonthKey,
+  nextDay,
+  nextMonth,
+  pad2,
+} from "./schedule";
 
 export class Brain {
+  private availabilityCache: Map<string, Availability[]> = new Map();
+
   constructor(
     public db: IdentityDB,
     public space: Space,
     public brainbase: BrainItem,
   ) {}
+
+  async createDailySchedule(
+    datetime: Date,
+    message: string,
+  ): Promise<DailySchedule | null> {
+    try {
+      const target = nextDay(datetime);
+      const dateKey = formatDateKey(target);
+      const topicName = `daily-schedule:${dateKey}`;
+
+      const monthlySummary = await this.getMonthlySummaryForDay(target);
+      const history = await this.getHistoryFacts();
+
+      const instruction = await loadPrompt("DAILY_SCHEDULE");
+      const promptMessage = [
+        `Target date: ${dateKey} (${target.toLocaleDateString("en-US", { weekday: "long" })})`,
+        `Personality: ${this.brainbase.baseSystemPrompt}`,
+        monthlySummary
+          ? `Monthly summary for this day: ${monthlySummary}`
+          : "(no monthly summary available for this date)",
+        `Recent history (facts):`,
+        history,
+        `User direction: ${message}`,
+      ].join("\n\n");
+
+      const schedule = await llm.call<DailySchedule>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+        jsonSchemaName: "daily-schedule",
+        jsonSchema: dailyScheduleSchema,
+      });
+
+      await this.db.addFact({
+        spaceName: this.space.name,
+        statement: JSON.stringify(schedule),
+        summary: `Daily schedule for ${dateKey} (${schedule.length} slots)`,
+        source: "createDailySchedule",
+        confidence: 1.0,
+        topics: [
+          {
+            name: topicName,
+            category: "temporal",
+            granularity: "concrete",
+            role: "schedule",
+          },
+          {
+            name: "daily-schedule",
+            category: "concept",
+            granularity: "abstract",
+            role: "schedule",
+          },
+          {
+            name: dateKey,
+            category: "temporal",
+            granularity: "concrete",
+            role: "date",
+          },
+        ],
+      });
+
+      return schedule;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`createDailySchedule failed: ${reason}`);
+      return null;
+    }
+  }
+
+  async createMonthlySchedule(
+    datetime: Date,
+    message: string,
+  ): Promise<MonthlySchedule | null> {
+    try {
+      const next = nextMonth(datetime);
+      const monthKey = `${next.year}-${pad2(next.month + 1)}`;
+      const topicName = `monthly-schedule:${monthKey}`;
+
+      const history = await this.getHistoryFacts();
+
+      const instruction = await loadPrompt("MONTHLY_SCHEDULE");
+      const promptMessage = [
+        `Target month: ${monthKey} (${next.daysInMonth} days)`,
+        `Personality: ${this.brainbase.baseSystemPrompt}`,
+        `Recent history (facts):`,
+        history,
+        `User direction: ${message}`,
+      ].join("\n\n");
+
+      const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+        jsonSchemaName: "monthly-schedule",
+        jsonSchema: monthlyScheduleSchema,
+      });
+
+      await this.db.addFact({
+        spaceName: this.space.name,
+        statement: JSON.stringify(schedule),
+        summary: `Monthly schedule for ${monthKey} (${schedule.length} days)`,
+        source: "createMonthlySchedule",
+        confidence: 1.0,
+        topics: [
+          {
+            name: topicName,
+            category: "temporal",
+            granularity: "concrete",
+            role: "schedule",
+          },
+          {
+            name: "monthly-schedule",
+            category: "concept",
+            granularity: "abstract",
+            role: "schedule",
+          },
+          {
+            name: monthKey,
+            category: "temporal",
+            granularity: "concrete",
+            role: "period",
+          },
+        ],
+      });
+
+      return schedule;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`createMonthlySchedule failed: ${reason}`);
+      return null;
+    }
+  }
+
+  async getTodayScheduledAvailability(
+    datetime: Date,
+  ): Promise<Availability[] | null> {
+    try {
+      const dateKey = formatDateKey(datetime);
+      const cached = this.availabilityCache.get(dateKey);
+      if (cached) return cached;
+
+      const topicName = `daily-schedule:${dateKey}`;
+      const facts = await this.db.getTopicFacts(topicName, {
+        spaceName: this.space.name,
+      });
+      if (facts.length === 0) return null;
+
+      const dailySchedule = JSON.parse(facts[0]!.statement) as DailySchedule;
+
+      const instruction = await loadPrompt("SCHEDULE_AVAILABILITY");
+      const promptMessage = JSON.stringify({
+        schedule: dailySchedule,
+        personality: this.brainbase.baseSystemPrompt,
+      });
+
+      const availability = await llm.call<Availability[]>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+        jsonSchemaName: "availability",
+        jsonSchema: availabilitySchema,
+      });
+
+      this.availabilityCache.set(dateKey, availability);
+      return availability;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`getTodayScheduledAvailability failed: ${reason}`);
+      return null;
+    }
+  }
+
+  removeScheduledAvailability(): void {
+    this.availabilityCache.clear();
+  }
+
+  private async getMonthlySummaryForDay(target: Date): Promise<string | null> {
+    try {
+      const monthKey = formatMonthKey(target);
+      const topicName = `monthly-schedule:${monthKey}`;
+      const facts = await this.db.getTopicFacts(topicName, {
+        spaceName: this.space.name,
+      });
+      if (facts.length === 0) return null;
+
+      const monthly = JSON.parse(facts[0]!.statement) as MonthlySchedule;
+      const day = target.getDate();
+      const entry = monthly.find((d) => d.day === day);
+      return entry?.summary ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getHistoryFacts(): Promise<string> {
+    try {
+      const topics = await this.db.listTopics({
+        spaceName: this.space.name,
+        includeFacts: true,
+      });
+      const statements: string[] = [];
+      for (const topic of topics) {
+        const t = topic as { facts?: Array<{ statement: string }> };
+        if (t.facts) {
+          for (const f of t.facts) statements.push(f.statement);
+        }
+      }
+      return statements.slice(-30).join("\n");
+    } catch {
+      return "";
+    }
+  }
 
   static async create(
     displayName: string,
