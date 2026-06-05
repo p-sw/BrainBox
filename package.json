@@ -7,7 +7,9 @@
     "brainbox": "./src/index.ts"
   },
   "scripts": {
-    "cli": "bun run src/index.ts"
+    "cli": "bun run src/index.ts",
+    "test": "bun test",
+    "format": "bun run prettier 'src/**/*.ts' -w"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -22,6 +24,7 @@
     "commander": "^15.0.0",
     "dotenv": "^17.4.2",
     "identitydb": "^0.5.1",
-    "ora": "^9.4.0"
+    "ora": "^9.4.0",
+    "prettier": "^3.8.3"
   }
 }
