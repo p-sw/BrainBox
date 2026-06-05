@@ -1,7 +1,13 @@
 import { readFile } from "fs/promises";
 import path from "path";
 
-const prompts = ["PERSONA_INIT", "PERSONA_BASE_SYSTEM_PROMPT"] as const;
+const prompts = [
+  "PERSONA_INIT",
+  "PERSONA_BASE_SYSTEM_PROMPT",
+  "DAILY_SCHEDULE",
+  "MONTHLY_SCHEDULE",
+  "SCHEDULE_AVAILABILITY",
+] as const;
 export type PromptKey = (typeof prompts)[number];
 
 function fileName(promptKey: PromptKey): string {
