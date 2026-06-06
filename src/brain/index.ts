@@ -21,6 +21,11 @@ import {
   nextMonth,
   pad2,
 } from "./schedule";
+import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
+
+export interface DebugOptions {
+  personality: string;
+}
 
 export class Brain {
   private availabilityCache: Map<string, Availability[]> = new Map();
@@ -29,6 +34,7 @@ export class Brain {
     public db: IdentityDB,
     public space: Space,
     public brainbase: BrainItem,
+    public debug: boolean = false,
   ) {}
 
   async createDailySchedule(
@@ -62,37 +68,44 @@ export class Brain {
         jsonSchema: dailyScheduleSchema,
       });
 
-      await this.db.addFact({
-        spaceName: this.space.name,
-        statement: JSON.stringify(schedule),
-        summary: `Daily schedule for ${dateKey} (${schedule.length} slots)`,
-        source: "createDailySchedule",
-        confidence: 1.0,
-        topics: [
-          {
-            name: topicName,
-            category: "temporal",
-            granularity: "concrete",
-            role: "schedule",
-          },
-          {
-            name: "daily-schedule",
-            category: "concept",
-            granularity: "abstract",
-            role: "schedule",
-          },
-          {
-            name: dateKey,
-            category: "temporal",
-            granularity: "concrete",
-            role: "date",
-          },
-        ],
-      });
+      if (!this.debug) {
+        await this.db.addFact({
+          spaceName: this.space.name,
+          statement: JSON.stringify(schedule),
+          summary: `Daily schedule for ${dateKey} (${schedule.length} slots)`,
+          source: "createDailySchedule",
+          confidence: 1.0,
+          topics: [
+            {
+              name: topicName,
+              category: "temporal",
+              granularity: "concrete",
+              role: "schedule",
+            },
+            {
+              name: "daily-schedule",
+              category: "concept",
+              granularity: "abstract",
+              role: "schedule",
+            },
+            {
+              name: dateKey,
+              category: "temporal",
+              granularity: "concrete",
+              role: "date",
+            },
+          ],
+        });
+      }
 
       return schedule;
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      let reason =
+        error instanceof Error
+          ? error.message + `(${error.name})`
+          : String(error);
+      if (error instanceof BadRequestResponseError)
+        reason = reason + `${error.body}`;
       logger.error(`createDailySchedule failed: ${reason}`);
       return null;
     }
@@ -125,33 +138,35 @@ export class Brain {
         jsonSchema: monthlyScheduleSchema,
       });
 
-      await this.db.addFact({
-        spaceName: this.space.name,
-        statement: JSON.stringify(schedule),
-        summary: `Monthly schedule for ${monthKey} (${schedule.length} days)`,
-        source: "createMonthlySchedule",
-        confidence: 1.0,
-        topics: [
-          {
-            name: topicName,
-            category: "temporal",
-            granularity: "concrete",
-            role: "schedule",
-          },
-          {
-            name: "monthly-schedule",
-            category: "concept",
-            granularity: "abstract",
-            role: "schedule",
-          },
-          {
-            name: monthKey,
-            category: "temporal",
-            granularity: "concrete",
-            role: "period",
-          },
-        ],
-      });
+      if (!this.debug) {
+        await this.db.addFact({
+          spaceName: this.space.name,
+          statement: JSON.stringify(schedule),
+          summary: `Monthly schedule for ${monthKey} (${schedule.length} days)`,
+          source: "createMonthlySchedule",
+          confidence: 1.0,
+          topics: [
+            {
+              name: topicName,
+              category: "temporal",
+              granularity: "concrete",
+              role: "schedule",
+            },
+            {
+              name: "monthly-schedule",
+              category: "concept",
+              granularity: "abstract",
+              role: "schedule",
+            },
+            {
+              name: monthKey,
+              category: "temporal",
+              granularity: "concrete",
+              role: "period",
+            },
+          ],
+        });
+      }
 
       return schedule;
     } catch (error) {
@@ -169,6 +184,13 @@ export class Brain {
       const cached = this.availabilityCache.get(dateKey);
       if (cached) return cached;
 
+      if (this.debug) {
+        logger.warn(
+          "getTodayScheduledAvailability requires a persisted daily schedule; debug brains have no DB. Use deriveAvailabilityFromSchedule(schedule) instead.",
+        );
+        return null;
+      }
+
       const topicName = `daily-schedule:${dateKey}`;
       const facts = await this.db.getTopicFacts(topicName, {
         spaceName: this.space.name,
@@ -176,19 +198,8 @@ export class Brain {
       if (facts.length === 0) return null;
 
       const dailySchedule = JSON.parse(facts[0]!.statement) as DailySchedule;
-
-      const instruction = await loadPrompt("SCHEDULE_AVAILABILITY");
-      const promptMessage = JSON.stringify({
-        schedule: dailySchedule,
-        personality: this.brainbase.baseSystemPrompt,
-      });
-
-      const availability = await llm.call<Availability[]>(llm.models.identity, {
-        instruction,
-        message: promptMessage,
-        jsonSchemaName: "availability",
-        jsonSchema: availabilitySchema,
-      });
+      const availability =
+        await this.deriveAvailabilityFromSchedule(dailySchedule);
 
       this.availabilityCache.set(dateKey, availability);
       return availability;
@@ -199,11 +210,35 @@ export class Brain {
     }
   }
 
+  async deriveAvailabilityFromSchedule(
+    schedule: DailySchedule,
+  ): Promise<Availability[]> {
+    try {
+      const instruction = await loadPrompt("SCHEDULE_AVAILABILITY");
+      const promptMessage = JSON.stringify({
+        schedule,
+        personality: this.brainbase.baseSystemPrompt,
+      });
+
+      return await llm.call<Availability[]>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+        jsonSchemaName: "availability",
+        jsonSchema: availabilitySchema,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`deriveAvailabilityFromSchedule failed: ${reason}`);
+      throw error;
+    }
+  }
+
   removeScheduledAvailability(): void {
     this.availabilityCache.clear();
   }
 
   private async getMonthlySummaryForDay(target: Date): Promise<string | null> {
+    if (this.debug) return null;
     try {
       const monthKey = formatMonthKey(target);
       const topicName = `monthly-schedule:${monthKey}`;
@@ -222,6 +257,7 @@ export class Brain {
   }
 
   private async getHistoryFacts(): Promise<string> {
+    if (this.debug) return "";
     try {
       const topics = await this.db.listTopics({
         spaceName: this.space.name,
@@ -305,5 +341,26 @@ export class Brain {
     if (!space) return null;
 
     return new Brain(db, space, brain);
+  }
+
+  static async createDebug(options: DebugOptions): Promise<Brain> {
+    const db = await IdentityDB.connect({
+      client: "sqlite",
+      filename: ":memory:",
+    });
+    await db.initialize();
+    const space = await db.upsertSpace({
+      name: "debug",
+      description: "Debug Brain",
+    });
+
+    const brainbase: BrainItem = {
+      brainId: "debug",
+      spaceName: "debug",
+      displayName: "Debug Brain",
+      baseSystemPrompt: options.personality,
+    };
+
+    return new Brain(db, space, brainbase, true);
   }
 }

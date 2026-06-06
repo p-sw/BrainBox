@@ -4,8 +4,9 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { logger } from "@/utils/logger";
-import { run } from "@/commands/run";
-import { brain } from "@/commands/brain";
+import { register as run } from "@/commands/run";
+import { register as brain } from "@/commands/brain";
+import { register as debug } from "@/commands/debug";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -32,8 +33,9 @@ program
     outputError: (str) => logger.error(str.replace("error: ", "")),
   });
 
-program.command("run").description("Run BrainBox").action(run);
-program.command("brain").description("Manage brains").action(brain);
+run(program);
+brain(program);
+debug(program);
 
 program.on("command:*", () => {
   logger.error(`Unknown command: ${program.args.join(" ")}`);

@@ -399,3 +399,55 @@ describe("S8: regression on existing methods", () => {
     expect(typeof Brain.load).toBe("function");
   });
 });
+
+describe("Brain.createDebug", () => {
+  test("D1: returns a Brain with debug=true, the supplied personality, and no disk file created", async () => {
+    const { existsSync } = await import("fs");
+    const { resolve } = await import("path");
+
+    const before = existsSync(resolve(process.cwd(), "brainbox.db"));
+
+    const brain = await Brain.createDebug({ personality: "test-personality-Q" });
+
+    expect(brain).toBeInstanceOf(Brain);
+    expect(brain.debug).toBe(true);
+    expect(brain.brainbase.baseSystemPrompt).toBe("test-personality-Q");
+    expect(brain.brainbase.displayName).toBe("Debug Brain");
+
+    const after = existsSync(resolve(process.cwd(), "brainbox.db"));
+    expect(after).toBe(before);
+  });
+
+  test("D2: createDailySchedule on a debug brain returns a schedule and does NOT add a fact to the DB", async () => {
+    const brain = await Brain.createDebug({ personality: "p" });
+    const today = new Date(2026, 5, 5);
+    const tomorrow = new Date(2026, 5, 6);
+    const tomorrowKey = formatDateKey(tomorrow);
+
+    const schedule = await brain.createDailySchedule(today, "msg");
+    expect(schedule).not.toBeNull();
+    expect(schedule).toHaveLength(48);
+
+    const facts = await brain.db.getTopicFacts(`daily-schedule:${tomorrowKey}`, {
+      spaceName: brain.space.name,
+    });
+    expect(facts).toHaveLength(0);
+  });
+
+  test("D3: createMonthlySchedule on a debug brain returns a schedule and does NOT add a fact to the DB", async () => {
+    const brain = await Brain.createDebug({ personality: "p" });
+    const today = new Date(2026, 0, 15);
+    const expected = nextMonth(today);
+    const monthKey = `${expected.year}-${String(expected.month + 1).padStart(2, "0")}`;
+
+    const schedule = await brain.createMonthlySchedule(today, "msg");
+    expect(schedule).not.toBeNull();
+    expect(schedule).toHaveLength(expected.daysInMonth);
+
+    const facts = await brain.db.getTopicFacts(
+      `monthly-schedule:${monthKey}`,
+      { spaceName: brain.space.name },
+    );
+    expect(facts).toHaveLength(0);
+  });
+});
