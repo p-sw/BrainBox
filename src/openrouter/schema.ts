@@ -46,20 +46,27 @@ const endTimeString = {
 };
 
 export const dailyScheduleSchema = {
-  type: "array",
-  minItems: 48,
-  maxItems: 48,
-  items: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      start: timeString,
-      end: endTimeString,
-      activity: { type: "string" },
-      notes: { type: "string" },
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    items: {
+      type: "array",
+      minItems: 48,
+      maxItems: 48,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          start: timeString,
+          end: endTimeString,
+          activity: { type: "string" },
+          notes: { type: "string" },
+        },
+        required: ["start", "end", "activity", "notes"],
+      },
     },
-    required: ["start", "end", "activity"],
   },
+  required: ["items"],
 };
 
 export const monthlyScheduleSchema = {
