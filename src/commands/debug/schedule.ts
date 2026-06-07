@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import ora from "ora";
 import { Brain } from "@/brain";
 import {
-  type Availability,
+  type AvailabilityWindows,
   type DailySchedule,
   type MonthlySchedule,
 } from "@/openrouter/schema";
@@ -21,7 +21,7 @@ export type DailyRunResult =
       dateKey: string;
       tomorrow: Date;
       schedule: DailySchedule;
-      availability: Availability[];
+      availability: AvailabilityWindows;
     }
   | { ok: false; error: string };
 
@@ -72,7 +72,7 @@ export async function runDebugScheduleDaily(
     return { ok: false, error: "Availability derivation failed" };
   }
   availSpinner.succeed(
-    `Availability derived (${availability.length} windows)`,
+    `Availability derived (${availability.items.length} windows)`,
   );
 
   printSection(`Availability — ${dateKey}`);
@@ -108,7 +108,7 @@ export async function runDebugScheduleMonthly(
     return { ok: false, error: "Monthly schedule generation failed" };
   }
   scheduleSpinner.succeed(
-    `Monthly schedule generated (${schedule.length} day summaries)`,
+    `Monthly schedule generated (${schedule.items.length} day summaries)`,
   );
 
   printSection(`Monthly Schedule — ${monthKey} (${next.daysInMonth} days)`);

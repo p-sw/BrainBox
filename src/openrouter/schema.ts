@@ -133,6 +133,8 @@ export const availabilitySchema = {
 // Types — co-located with their schemas.
 // ----------------------------------------------------------------------------
 
+import type { ExtractedFact } from "identitydb";
+
 /** A single 30-minute slot in a daily schedule. Matches `dailyScheduleSchema.items.items`. */
 export type DailySlot = {
   start: string;
@@ -150,24 +152,43 @@ export type DailySchedule = {
   items: DailySlot[];
 };
 
-/** A single day's summary inside a monthly schedule. Matches `monthlyScheduleSchema.items`. */
+/** A single day's summary inside a monthly schedule. Matches `monthlyScheduleSchema.items.items`. */
 export type MonthlyDay = {
   day: number;
   summary: string;
 };
 
-/** A complete monthly schedule. Matches `monthlyScheduleSchema`. */
-export type MonthlySchedule = MonthlyDay[];
+/**
+ * A complete monthly schedule: a wrapped object containing one entry per day
+ * of the month. Matches `monthlyScheduleSchema`.
+ */
+export type MonthlySchedule = {
+  items: MonthlyDay[];
+};
 
 /** Reachability status for a single availability window. */
 export type AvailabilityStatus = "online" | "do-not-disturb" | "offline";
 
-/** A single availability window. Matches `availabilitySchema.items`. */
+/** A single availability window. Matches `availabilitySchema.items.items`. */
 export type Availability = {
   start: string;
   end: string;
   status: AvailabilityStatus;
 };
 
-/** The full set of availability windows for a day. Matches `availabilitySchema`. */
-export type AvailabilityWindows = Availability[];
+/**
+ * The full set of availability windows for a day: a wrapped object containing
+ * one or more windows. Matches `availabilitySchema`.
+ */
+export type AvailabilityWindows = {
+  items: Availability[];
+};
+
+/**
+ * The wrapped envelope the LLM returns for `extractedFactSchema`. The inner
+ * `items` array is the list of `ExtractedFact` (which is defined in the
+ * external `identitydb` package).
+ */
+export type ExtractedFactResult = {
+  items: ExtractedFact[];
+};

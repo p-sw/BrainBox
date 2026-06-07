@@ -80,16 +80,20 @@ const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
     return { items: customDailySlots ?? build48Slots() } as unknown as T;
   }
   if (options.jsonSchemaName === "monthly-schedule") {
-    if (customMonthlyDays) return customMonthlyDays as unknown as T;
+    if (customMonthlyDays) {
+      return { items: customMonthlyDays } as unknown as T;
+    }
     const match = options.message.match(/\((\d+) days\)/);
     const days = match ? parseInt(match[1]!, 10) : 30;
-    return Array.from({ length: days }, (_, i) => ({
-      day: i + 1,
-      summary: `Day ${i + 1} summary`,
-    })) as unknown as T;
+    return {
+      items: Array.from({ length: days }, (_, i) => ({
+        day: i + 1,
+        summary: `Day ${i + 1} summary`,
+      })),
+    } as unknown as T;
   }
   if (options.jsonSchemaName === "availability") {
-    return (customAvailability ?? buildAvailability()) as unknown as T;
+    return { items: customAvailability ?? buildAvailability() } as unknown as T;
   }
   throw new Error(`unexpected jsonSchemaName: ${options.jsonSchemaName}`);
 });
@@ -267,9 +271,11 @@ describe("Brain.createMonthlySchedule", () => {
     const result = await brain.createMonthlySchedule(today, "study for GRE");
 
     expect(result).not.toBeNull();
-    expect(result).toHaveLength(expected.daysInMonth);
-    expect(result![0]!.day).toBe(1);
-    expect(result![result!.length - 1]!.day).toBe(expected.daysInMonth);
+    expect(result!.items).toHaveLength(expected.daysInMonth);
+    expect(result!.items[0]!.day).toBe(1);
+    expect(result!.items[result!.items.length - 1]!.day).toBe(
+      expected.daysInMonth,
+    );
 
     const llmCall = llmCalls.find(
       (c) => c.options.jsonSchemaName === "monthly-schedule",
@@ -285,7 +291,9 @@ describe("Brain.createMonthlySchedule", () => {
       },
     );
     expect(facts).toHaveLength(1);
-    expect(JSON.parse(facts[0]!.statement)).toHaveLength(expected.daysInMonth);
+    expect(JSON.parse(facts[0]!.statement).items).toHaveLength(
+      expected.daysInMonth,
+    );
   });
 
   test("S5: year wrap (December 15 -> January next year)", async () => {
@@ -296,7 +304,7 @@ describe("Brain.createMonthlySchedule", () => {
     const result = await brain.createMonthlySchedule(today, "");
 
     expect(result).not.toBeNull();
-    expect(result).toHaveLength(31);
+    expect(result!.items).toHaveLength(31);
 
     const facts = await brain.db.getTopicFacts(
       `monthly-schedule:${expectedKey}`,
@@ -337,8 +345,8 @@ describe("Brain.getTodayScheduledAvailability", () => {
     const result = await brain.getTodayScheduledAvailability(today);
 
     expect(result).not.toBeNull();
-    expect(result!.length).toBeGreaterThan(0);
-    for (const w of result!) {
+    expect(result!.items.length).toBeGreaterThan(0);
+    for (const w of result!.items) {
       expect(["online", "do-not-disturb", "offline"]).toContain(w.status);
       expect(w.start).toMatch(/^([01][0-9]|2[0-3]):[0-5][0-9]$/);
       expect(w.end).toMatch(/^([01][0-9]|2[0-3]):[0-5][0-9]$|^24:00$/);
@@ -451,7 +459,7 @@ describe("Brain.createDebug", () => {
 
     const schedule = await brain.createMonthlySchedule(today, "msg");
     expect(schedule).not.toBeNull();
-    expect(schedule).toHaveLength(expected.daysInMonth);
+    expect(schedule!.items).toHaveLength(expected.daysInMonth);
 
     const facts = await brain.db.getTopicFacts(
       `monthly-schedule:${monthKey}`,

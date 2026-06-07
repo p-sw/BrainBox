@@ -73,7 +73,7 @@ const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
     return GENERATED_BASE_SYSTEM_PROMPT as unknown as T;
   }
   if (options.jsonSchemaName === "fact-extractor") {
-    return EXTRACTED_FACTS as unknown as T;
+    return { items: EXTRACTED_FACTS } as unknown as T;
   }
   throw new Error(
     `unexpected LLM call: model=${model} instruction=${options.instruction?.slice(0, 80)}`,

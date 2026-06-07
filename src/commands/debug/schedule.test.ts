@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type {
   Availability,
   DailySlot,
-  MonthlySchedule,
+  MonthlyDay,
 } from "@/openrouter/schema";
 
 interface RecordedCall {
@@ -39,7 +39,7 @@ function buildAvailability(): Availability[] {
   ];
 }
 
-function buildMonthly(): MonthlySchedule {
+function buildMonthlyDays(): MonthlyDay[] {
   return Array.from({ length: 30 }, (_, i) => ({
     day: i + 1,
     summary: `Day ${i + 1} summary`,
@@ -53,12 +53,15 @@ const mockCall = mock(async (_model: unknown, options: any) => {
   if (options.jsonSchemaName === "monthly-schedule") {
     const match = (options.message as string).match(/\((\d+) days\)/);
     const days = match ? parseInt(match[1]!, 10) : 30;
-    return Array.from({ length: days }, (_, i) => ({
-      day: i + 1,
-      summary: `Day ${i + 1} summary`,
-    }));
+    return {
+      items: Array.from({ length: days }, (_, i) => ({
+        day: i + 1,
+        summary: `Day ${i + 1} summary`,
+      })),
+    };
   }
-  if (options.jsonSchemaName === "availability") return buildAvailability();
+  if (options.jsonSchemaName === "availability")
+    return { items: buildAvailability() };
   throw new Error(`unexpected jsonSchemaName: ${options.jsonSchemaName}`);
 });
 
@@ -87,7 +90,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // ensure no on-disk braindb was created
   const { unlink } = await import("fs/promises");
   try {
     await unlink("/tmp/brainbox-test-braindb-debug-schedule.json");
@@ -106,7 +108,7 @@ describe("runDebugScheduleDaily", () => {
 
     expect(result.kind).toBe("daily");
     expect(result.schedule.items).toHaveLength(48);
-    expect(result.availability.length).toBeGreaterThan(0);
+    expect(result.availability.items.length).toBeGreaterThan(0);
     expect(result.dateKey).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     const dailyCall = llmCalls.find(
@@ -145,7 +147,7 @@ describe("runDebugScheduleMonthly", () => {
     if (!result.ok) throw new Error("expected ok");
 
     expect(result.kind).toBe("monthly");
-    expect(result.schedule).toHaveLength(result.daysInMonth);
+    expect(result.schedule.items).toHaveLength(result.daysInMonth);
     expect(result.monthKey).toMatch(/^\d{4}-\d{2}$/);
 
     const call = llmCalls.find(
@@ -187,3 +189,4 @@ describe("debug schedule no-disk invariant", () => {
     expect(afterJson).toBe(false);
   });
 });
+

@@ -8,6 +8,7 @@ import {
   dailyScheduleSchema,
   monthlyScheduleSchema,
   type Availability,
+  type AvailabilityWindows,
   type DailySchedule,
   type MonthlySchedule,
 } from "@/openrouter/schema";
@@ -28,7 +29,7 @@ export interface DebugOptions {
 }
 
 export class Brain {
-  private availabilityCache: Map<string, Availability[]> = new Map();
+  private availabilityCache: Map<string, AvailabilityWindows> = new Map();
 
   constructor(
     public db: IdentityDB,
@@ -142,7 +143,7 @@ export class Brain {
         await this.db.addFact({
           spaceName: this.space.name,
           statement: JSON.stringify(schedule),
-          summary: `Monthly schedule for ${monthKey} (${schedule.length} days)`,
+          summary: `Monthly schedule for ${monthKey} (${schedule.items.length} days)`,
           source: "createMonthlySchedule",
           confidence: 1.0,
           topics: [
@@ -178,7 +179,7 @@ export class Brain {
 
   async getTodayScheduledAvailability(
     datetime: Date,
-  ): Promise<Availability[] | null> {
+  ): Promise<AvailabilityWindows | null> {
     try {
       const dateKey = formatDateKey(datetime);
       const cached = this.availabilityCache.get(dateKey);
@@ -212,7 +213,7 @@ export class Brain {
 
   async deriveAvailabilityFromSchedule(
     schedule: DailySchedule,
-  ): Promise<Availability[]> {
+  ): Promise<AvailabilityWindows> {
     try {
       const instruction = await loadPrompt("SCHEDULE_AVAILABILITY");
       const promptMessage = JSON.stringify({
@@ -220,7 +221,7 @@ export class Brain {
         personality: this.brainbase.baseSystemPrompt,
       });
 
-      return await llm.call<Availability[]>(llm.models.identity, {
+      return await llm.call<AvailabilityWindows>(llm.models.identity, {
         instruction,
         message: promptMessage,
         jsonSchemaName: "availability",
@@ -249,7 +250,7 @@ export class Brain {
 
       const monthly = JSON.parse(facts[0]!.statement) as MonthlySchedule;
       const day = target.getDate();
-      const entry = monthly.find((d) => d.day === day);
+      const entry = monthly.items.find((d) => d.day === day);
       return entry?.summary ?? null;
     } catch {
       return null;
