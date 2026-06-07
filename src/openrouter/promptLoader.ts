@@ -8,6 +8,7 @@ const prompts = [
   "DAILY_SCHEDULE",
   "MONTHLY_SCHEDULE",
   "SCHEDULE_AVAILABILITY",
+  "OBJECTIFIER",
 ] as const;
 export type PromptKey = (typeof prompts)[number];
 
