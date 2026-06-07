@@ -98,3 +98,46 @@ export const availabilitySchema = {
     required: ["start", "end", "status"],
   },
 };
+
+// ----------------------------------------------------------------------------
+// Types — co-located with their schemas.
+// ----------------------------------------------------------------------------
+
+/** A single 30-minute slot in a daily schedule. Matches `dailyScheduleSchema.items.items`. */
+export type DailySlot = {
+  start: string;
+  end: string;
+  activity: string;
+  notes: string;
+};
+
+/**
+ * A complete daily schedule: a wrapped object containing exactly 48 half-hour
+ * slots. Matches `dailyScheduleSchema` (the LLM is constrained to return the
+ * `{ items: [...] }` envelope).
+ */
+export type DailySchedule = {
+  items: DailySlot[];
+};
+
+/** A single day's summary inside a monthly schedule. Matches `monthlyScheduleSchema.items`. */
+export type MonthlyDay = {
+  day: number;
+  summary: string;
+};
+
+/** A complete monthly schedule. Matches `monthlyScheduleSchema`. */
+export type MonthlySchedule = MonthlyDay[];
+
+/** Reachability status for a single availability window. */
+export type AvailabilityStatus = "online" | "do-not-disturb" | "offline";
+
+/** A single availability window. Matches `availabilitySchema.items`. */
+export type Availability = {
+  start: string;
+  end: string;
+  status: AvailabilityStatus;
+};
+
+/** The full set of availability windows for a day. Matches `availabilitySchema`. */
+export type AvailabilityWindows = Availability[];

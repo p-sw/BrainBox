@@ -16,6 +16,7 @@ let customDailySlots: Array<{
   start: string;
   end: string;
   activity: string;
+  notes: string;
 }> | null = null;
 let customAvailability: Array<{
   start: string;
@@ -27,8 +28,14 @@ function build48Slots(): Array<{
   start: string;
   end: string;
   activity: string;
+  notes: string;
 }> {
-  const slots: Array<{ start: string; end: string; activity: string }> = [];
+  const slots: Array<{
+    start: string;
+    end: string;
+    activity: string;
+    notes: string;
+  }> = [];
   for (let i = 0; i < 48; i++) {
     const startHour = Math.floor(i / 2);
     const startMin = (i % 2) * 30;
@@ -41,7 +48,7 @@ function build48Slots(): Array<{
       const endMin = ((i + 1) % 2) * 30;
       end = `${String(endHour).padStart(2, "0")}:${String(endMin).padStart(2, "0")}`;
     }
-    slots.push({ start, end, activity: `slot-${i}` });
+    slots.push({ start, end, activity: `slot-${i}`, notes: "" });
   }
   return slots;
 }
@@ -70,7 +77,7 @@ function buildAvailability(): Array<{
 const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
   llmCalls.push({ model, options });
   if (options.jsonSchemaName === "daily-schedule") {
-    return (customDailySlots ?? build48Slots()) as unknown as T;
+    return { items: customDailySlots ?? build48Slots() } as unknown as T;
   }
   if (options.jsonSchemaName === "monthly-schedule") {
     if (customMonthlyDays) return customMonthlyDays as unknown as T;
@@ -150,16 +157,18 @@ describe("Brain.createDailySchedule", () => {
     const result = await brain.createDailySchedule(today, "focus on writing");
 
     expect(result).not.toBeNull();
-    expect(result).toHaveLength(48);
-    expect(result![0]).toEqual({
+    expect(result!.items).toHaveLength(48);
+    expect(result!.items[0]).toEqual({
       start: "00:00",
       end: "00:30",
       activity: "slot-0",
+      notes: "",
     });
-    expect(result![47]).toEqual({
+    expect(result!.items[47]).toEqual({
       start: "23:30",
       end: "24:00",
       activity: "slot-47",
+      notes: "",
     });
 
     const llmCall = llmCalls.find(
@@ -177,7 +186,7 @@ describe("Brain.createDailySchedule", () => {
       },
     );
     expect(facts).toHaveLength(1);
-    expect(JSON.parse(facts[0]!.statement)).toHaveLength(48);
+    expect(JSON.parse(facts[0]!.statement).items).toHaveLength(48);
   });
 
   test("S4: month wrap (June 30 -> July 1)", async () => {
@@ -306,7 +315,7 @@ describe("Brain.getTodayScheduledAvailability", () => {
     const todayKey = formatDateKey(today);
     await brain.db.addFact({
       spaceName: brain.space.name,
-      statement: JSON.stringify(build48Slots()),
+      statement: JSON.stringify({ items: build48Slots() }),
       summary: "test daily",
       source: "test",
       confidence: 1.0,
@@ -357,7 +366,7 @@ describe("Brain.removeScheduledAvailability", () => {
     const todayKey = formatDateKey(today);
     await brain.db.addFact({
       spaceName: brain.space.name,
-      statement: JSON.stringify(build48Slots()),
+      statement: JSON.stringify({ items: build48Slots() }),
       summary: "test daily",
       source: "test",
       confidence: 1.0,
@@ -426,7 +435,7 @@ describe("Brain.createDebug", () => {
 
     const schedule = await brain.createDailySchedule(today, "msg");
     expect(schedule).not.toBeNull();
-    expect(schedule).toHaveLength(48);
+    expect(schedule!.items).toHaveLength(48);
 
     const facts = await brain.db.getTopicFacts(`daily-schedule:${tomorrowKey}`, {
       spaceName: brain.space.name,

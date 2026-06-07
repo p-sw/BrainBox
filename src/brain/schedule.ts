@@ -1,25 +1,3 @@
-export type DailySlot = {
-  start: string;
-  end: string;
-  activity: string;
-  notes?: string;
-};
-export type DailySchedule = DailySlot[];
-
-export type MonthlyDay = {
-  day: number;
-  summary: string;
-};
-export type MonthlySchedule = MonthlyDay[];
-
-export type AvailabilityStatus = "online" | "do-not-disturb" | "offline";
-export type Availability = {
-  start: string;
-  end: string;
-  status: AvailabilityStatus;
-};
-export type AvailabilityWindows = Availability[];
-
 export function pad2(n: number): string {
   return n < 10 ? `0${n}` : `${n}`;
 }

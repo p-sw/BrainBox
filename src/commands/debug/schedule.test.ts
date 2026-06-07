@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Availability, DailySchedule, MonthlySchedule } from "@/brain/schedule";
+import type {
+  Availability,
+  DailySlot,
+  MonthlySchedule,
+} from "@/openrouter/schema";
 
 interface RecordedCall {
   model: unknown;
@@ -8,8 +12,8 @@ interface RecordedCall {
 
 const llmCalls: RecordedCall[] = [];
 
-function build48Slots(): DailySchedule {
-  const slots: DailySchedule = [];
+function build48Slots(): DailySlot[] {
+  const slots: DailySlot[] = [];
   for (let i = 0; i < 48; i++) {
     const startHour = Math.floor(i / 2);
     const startMin = (i % 2) * 30;
@@ -22,7 +26,7 @@ function build48Slots(): DailySchedule {
       const endMin = ((i + 1) % 2) * 30;
       end = `${String(endHour).padStart(2, "0")}:${String(endMin).padStart(2, "0")}`;
     }
-    slots.push({ start, end, activity: `slot-${i}` });
+    slots.push({ start, end, activity: `slot-${i}`, notes: "" });
   }
   return slots;
 }
@@ -44,7 +48,8 @@ function buildMonthly(): MonthlySchedule {
 
 const mockCall = mock(async (_model: unknown, options: any) => {
   llmCalls.push({ model: _model, options });
-  if (options.jsonSchemaName === "daily-schedule") return build48Slots();
+  if (options.jsonSchemaName === "daily-schedule")
+    return { items: build48Slots() };
   if (options.jsonSchemaName === "monthly-schedule") {
     const match = (options.message as string).match(/\((\d+) days\)/);
     const days = match ? parseInt(match[1]!, 10) : 30;
@@ -100,7 +105,7 @@ describe("runDebugScheduleDaily", () => {
     if (!result.ok) throw new Error("expected ok");
 
     expect(result.kind).toBe("daily");
-    expect(result.schedule).toHaveLength(48);
+    expect(result.schedule.items).toHaveLength(48);
     expect(result.availability.length).toBeGreaterThan(0);
     expect(result.dateKey).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 

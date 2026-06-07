@@ -1,15 +1,13 @@
 import type { Command } from "commander";
 import ora from "ora";
 import { Brain } from "@/brain";
-import { logger } from "@/utils/logger";
 import {
   type Availability,
   type DailySchedule,
   type MonthlySchedule,
-  formatDateKey,
-  nextMonth,
-  pad2,
-} from "@/brain/schedule";
+} from "@/openrouter/schema";
+import { logger } from "@/utils/logger";
+import { formatDateKey, nextMonth, pad2 } from "@/brain/schedule";
 
 export interface ScheduleOptions {
   message: string;
@@ -59,7 +57,7 @@ export async function runDebugScheduleDaily(
     return { ok: false, error: "Daily schedule generation failed" };
   }
   scheduleSpinner.succeed(
-    `Daily schedule generated (${schedule.length} slots)`,
+    `Daily schedule generated (${schedule.items.length} slots)`,
   );
 
   printSection(

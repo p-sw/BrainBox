@@ -7,14 +7,14 @@ import {
   availabilitySchema,
   dailyScheduleSchema,
   monthlyScheduleSchema,
+  type Availability,
+  type DailySchedule,
+  type MonthlySchedule,
 } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
 import { factExtractor } from "./factExtractor";
 import { brainManager, type BrainItem } from "./manager";
 import {
-  type Availability,
-  type DailySchedule,
-  type MonthlySchedule,
   formatDateKey,
   formatMonthKey,
   nextDay,
@@ -72,7 +72,7 @@ export class Brain {
         await this.db.addFact({
           spaceName: this.space.name,
           statement: JSON.stringify(schedule),
-          summary: `Daily schedule for ${dateKey} (${schedule.length} slots)`,
+          summary: `Daily schedule for ${dateKey} (${schedule.items.length} slots)`,
           source: "createDailySchedule",
           confidence: 1.0,
           topics: [
@@ -291,11 +291,11 @@ export class Brain {
         "PERSONA_BASE_SYSTEM_PROMPT",
       );
       const generatedBaseSystemPrompt = await llm.call<string>(
-llm.models.identity,
-{
-        instruction: personaSystemInstruction,
-        message: description,
-      },
+        llm.models.identity,
+        {
+          instruction: personaSystemInstruction,
+          message: description,
+        },
       );
 
       const personaSystemFixed = await loadPrompt(
