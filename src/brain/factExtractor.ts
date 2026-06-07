@@ -1,6 +1,6 @@
 import { llm } from "@/openrouter";
 import { extractedFactSchema, type ExtractedFactResult } from "@/openrouter/schema";
-import { type ExtractedFact, LlmFactExtractor } from "identitydb";
+import { LlmFactExtractor } from "identitydb";
 
 export const factExtractor = new LlmFactExtractor({
   model: {
