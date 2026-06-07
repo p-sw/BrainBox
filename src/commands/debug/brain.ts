@@ -4,6 +4,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { Command } from "commander";
 import ora from "ora";
+import type { ExtractedFact } from "identitydb";
 import { Brain } from "@/brain";
 import { logger } from "@/utils/logger";
 
@@ -19,18 +20,26 @@ export type BrainInitResult =
       displayName: string;
       brainId: string;
       spaceName: string;
+      description: string;
       baseSystemPrompt: string;
+      extractedFacts: ExtractedFact[];
     }
   | { ok: false; error: string };
 
 /**
  * Exercise the full `Brain.create` flow (PERSONA_INIT → PERSONA_BASE_SYSTEM_PROMPT
- * LLM calls → SQLite DB upsert → fact extraction → braindb save) without
- * touching real on-disk state.
+ * LLM calls → SQLite DB upsert → fact extraction via `factExtractor.extract` →
+ * braindb save) without touching real on-disk state.
  *
  * - SQLite DB uses `:memory:` (ephemeral, dies with the process).
  * - The braindb JSON is written to a fresh temp file under `os.tmpdir()`
  *   and unlinked after the run.
+ *
+ * Prints the full text of:
+ *   1. the generated `description` (PERSONA_INIT output)
+ *   2. the concatenated `baseSystemPrompt` (generated + fixed)
+ *   3. the `extractedFacts` (obtained by directly calling
+ *      `factExtractor.extract(description)`)
  */
 export async function runDebugBrainInit(
   opts: BrainInitOptions,
@@ -44,27 +53,53 @@ export async function runDebugBrainInit(
     `Initializing brain "${opts.displayName}" with LLM (debug, no real disk state)...`,
   ).start();
   try {
-    const brain = await Brain.create(opts.displayName, opts.seed, {
+    const result = await Brain.create(opts.displayName, opts.seed, {
       dbPath: ":memory:",
       braindbPath,
+      debug: true,
     });
-    if (!brain) {
+    if (!result) {
       spinner.fail("Brain initialization failed");
       return { ok: false, error: "Brain initialization failed" };
     }
+    const {
+      brain,
+      description,
+      baseSystemPrompt,
+      extractedFacts,
+    } = result;
+    const factCount = extractedFacts?.length ?? 0;
     spinner.succeed(
-      `Brain initialized (id=${brain.brainbase.brainId}, space=${brain.brainbase.spaceName})`,
+      `Brain initialized (id=${brain.brainbase.brainId}, space=${brain.brainbase.spaceName}, ${factCount} fact(s) extracted)`,
     );
 
+    printSection(`Description (PERSONA_INIT output)`);
+    console.log(description);
+    console.log();
+
+    printSection(`baseSystemPrompt (PERSONA_BASE_SYSTEM_PROMPT + FIXED)`);
+    console.log(baseSystemPrompt);
+    console.log();
+
     printSection(
-      `Brain — ${opts.displayName} (${brain.brainbase.brainId})`,
+      `Extracted facts (factExtractor.extract — ${factCount})`,
     );
-    console.log(`spaceName:        ${brain.brainbase.spaceName}`);
-    console.log(`displayName:      ${brain.brainbase.displayName}`);
-    console.log(`baseSystemPrompt (first 240 chars):`);
-    console.log(
-      `  ${brain.brainbase.baseSystemPrompt.slice(0, 240).replace(/\n/g, "\n  ")}${brain.brainbase.baseSystemPrompt.length > 240 ? "..." : ""}`,
-    );
+    if (extractedFacts && extractedFacts.length > 0) {
+      extractedFacts.forEach((fact, i) => {
+        console.log(`\n[${i + 1}/${extractedFacts.length}]`);
+        console.log(`  statement:   ${fact.statement ?? ""}`);
+        console.log(`  summary:     ${fact.summary ?? ""}`);
+        console.log(`  source:      ${fact.source ?? ""}`);
+        console.log(`  confidence:  ${fact.confidence ?? ""}`);
+        console.log(`  topics:      ${JSON.stringify(fact.topics)}`);
+        if (fact.metadata) {
+          console.log(`  metadata:    ${JSON.stringify(fact.metadata)}`);
+        }
+      });
+    } else {
+      console.log("  (no facts extracted)");
+    }
+    console.log();
 
     logger.info("Debug run complete. Nothing was written to real disk.");
 
@@ -74,14 +109,15 @@ export async function runDebugBrainInit(
       displayName: opts.displayName,
       brainId: brain.brainbase.brainId,
       spaceName: brain.brainbase.spaceName,
-      baseSystemPrompt: brain.brainbase.baseSystemPrompt,
+      description,
+      baseSystemPrompt,
+      extractedFacts: extractedFacts ?? [],
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     spinner.fail("Brain initialization failed");
     return { ok: false, error: reason };
   } finally {
-    // Clean up the temp braindb file regardless of success/failure.
     try {
       await unlink(braindbPath);
     } catch {}

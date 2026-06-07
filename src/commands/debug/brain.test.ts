@@ -1,5 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, readdirSync } from "fs";
+import { unlink, writeFile } from "fs/promises";
+import type { ExtractedFact } from "identitydb";
 import { tmpdir } from "os";
 
 interface RecordedCall {
@@ -16,18 +19,7 @@ const llmCalls: RecordedCall[] = [];
 const PERSONA_DESCRIPTION = "A 34yo night-shift nurse, hides exhaustion behind sarcasm.";
 const GENERATED_BASE_SYSTEM_PROMPT =
   "You are Maren. You text in lowercase. You use '...' when tired.";
-const EXTRACTED_FACTS: Array<{
-  statement: string;
-  summary: string;
-  source: string;
-  confidence: number;
-  topics: Array<{
-    name: string;
-    category: string;
-    granularity: string;
-    role: string;
-  }>;
-}> = [
+const EXTRACTED_FACTS: ExtractedFact[] = [
   {
     statement: "Maren is 34 years old.",
     summary: "Maren is 34 years old.",
@@ -96,6 +88,7 @@ mock.module("@/config", () => ({
 }));
 
 const { runDebugBrainInit } = await import("./brain");
+const { Brain: ProdBrain } = await import("@/brain");
 
 beforeEach(() => {
   llmCalls.length = 0;
@@ -115,7 +108,7 @@ afterEach(async () => {
 });
 
 describe("runDebugBrainInit", () => {
-  test("B1: returns ok result with brainId, spaceName, baseSystemPrompt, and uses the supplied seed", async () => {
+  test("B1: returns ok result with full description, baseSystemPrompt, extractedFacts, and uses the supplied seed", async () => {
     const result = await runDebugBrainInit({
       displayName: "Maren",
       seed: "Maren, 34, night-shift nurse, hides exhaustion behind sarcasm",
@@ -131,6 +124,8 @@ describe("runDebugBrainInit", () => {
     );
     expect(result.spaceName).toBe(`brain:${result.brainId}`);
 
+    expect(result.description).toBe(PERSONA_DESCRIPTION);
+
     expect(result.baseSystemPrompt).toContain(GENERATED_BASE_SYSTEM_PROMPT);
     expect(result.baseSystemPrompt).toContain("You exist in a text chat.");
     expect(result.baseSystemPrompt).toBe(
@@ -139,6 +134,8 @@ describe("runDebugBrainInit", () => {
           GENERATED_BASE_SYSTEM_PROMPT.length + 2,
         ),
     );
+
+    expect(result.extractedFacts).toEqual(EXTRACTED_FACTS);
   });
 
   test("B2: invokes the LLM exactly 3 times — PERSONA_INIT, PERSONA_BASE_SYSTEM_PROMPT, fact-extractor", async () => {
@@ -205,5 +202,51 @@ describe("runDebugBrainInit", () => {
       seed: "no env",
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("Brain.create (production path — debug: false)", () => {
+  test("B6: with debug omitted (default), uses db.ingestStatements and does NOT return extractedFacts", async () => {
+    const braindbPath = `${tmpdir()}/brainbox-prod-brain-${randomUUID()}.json`;
+    await writeFile(braindbPath, "{}", { encoding: "utf-8" });
+
+    const result = await ProdBrain.create("ProdMaren", "a prod seed", {
+      dbPath: ":memory:",
+      braindbPath,
+    });
+
+    try {
+      expect(result).not.toBeNull();
+      if (!result) throw new Error("expected result");
+      expect(result.brain).toBeDefined();
+      expect(result.description).toBe(PERSONA_DESCRIPTION);
+      expect(result.baseSystemPrompt).toContain(GENERATED_BASE_SYSTEM_PROMPT);
+      expect(result.extractedFacts).toBeUndefined();
+    } finally {
+      try {
+        await unlink(braindbPath);
+      } catch {}
+    }
+  });
+
+  test("B7: with debug: false (explicit), same as default — uses db.ingestStatements, no extractedFacts", async () => {
+    const braindbPath = `${tmpdir()}/brainbox-prod-brain-${randomUUID()}.json`;
+    await writeFile(braindbPath, "{}", { encoding: "utf-8" });
+
+    const result = await ProdBrain.create("ProdMaren2", "seed", {
+      dbPath: ":memory:",
+      braindbPath,
+      debug: false,
+    });
+
+    try {
+      expect(result).not.toBeNull();
+      if (!result) throw new Error("expected result");
+      expect(result.extractedFacts).toBeUndefined();
+    } finally {
+      try {
+        await unlink(braindbPath);
+      } catch {}
+    }
   });
 });

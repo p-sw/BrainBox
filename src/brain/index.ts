@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { config } from "@/config";
-import { IdentityDB, type Space } from "identitydb";
+import { IdentityDB, type ExtractedFact, type Space } from "identitydb";
 import { llm } from "@/openrouter";
 import { loadPrompt } from "@/openrouter/promptLoader";
 import {
@@ -26,6 +26,19 @@ import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
 
 export interface DebugOptions {
   personality: string;
+}
+
+export interface BrainCreateResult {
+  brain: Brain;
+  description: string;
+  baseSystemPrompt: string;
+  /**
+   * Raw facts as returned by `factExtractor.extract(description)`. Populated
+   * only when `Brain.create` is called with `debug: true`; in production
+   * (the default), facts are persisted via `db.ingestStatements` which does
+   * not surface the raw extractor output to the caller.
+   */
+  extractedFacts?: ExtractedFact[];
 }
 
 export class Brain {
@@ -280,8 +293,8 @@ export class Brain {
   static async create(
     displayName: string,
     seed: string,
-    options: { dbPath?: string; braindbPath?: string } = {},
-  ): Promise<Brain | null> {
+    options: { dbPath?: string; braindbPath?: string; debug?: boolean } = {},
+  ): Promise<BrainCreateResult | null> {
     const dbPath = options.dbPath ?? config.dbPath;
     const manager = options.braindbPath
       ? new BrainDBManager(options.braindbPath)
@@ -321,10 +334,26 @@ export class Brain {
         description: displayName,
       });
 
-      await db.ingestStatement(description, {
-        extractor: factExtractor,
-        spaceName,
-      });
+      let extractedFacts: ExtractedFact[] | undefined;
+      if (options.debug) {
+        extractedFacts = await factExtractor.extract(description);
+        for (const fact of extractedFacts) {
+          await db.addFact({
+            spaceName,
+            statement: fact.statement ?? description,
+            summary: fact.summary,
+            source: fact.source,
+            confidence: fact.confidence,
+            topics: fact.topics,
+            metadata: fact.metadata,
+          });
+        }
+      } else {
+        await db.ingestStatements(description, {
+          extractor: factExtractor,
+          spaceName,
+        });
+      }
 
       const brainbase: BrainItem = {
         brainId,
@@ -334,7 +363,8 @@ export class Brain {
       };
       await manager.saveBrain(brainId, brainbase);
 
-      return new Brain(db, space, brainbase);
+      const brain = new Brain(db, space, brainbase);
+      return { brain, description, baseSystemPrompt, extractedFacts };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to create brain "${displayName}": ${reason}`);
