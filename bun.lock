@@ -9,7 +9,7 @@
         "chalk": "^5.6.2",
         "commander": "^15.0.0",
         "dotenv": "^17.4.2",
-        "identitydb": "^0.5.1",
+        "identitydb": "^0.5.2",
         "ora": "^9.4.0",
         "prettier": "^3.8.3",
       },
@@ -53,7 +53,7 @@
 
     "iconv-lite": ["iconv-lite@0.7.2", "", { "dependencies": { "safer-buffer": ">= 2.1.2 < 3.0.0" } }, "sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw=="],
 
-    "identitydb": ["identitydb@0.5.1", "", { "dependencies": { "kysely": "^0.28.8", "mysql2": "^3.15.3", "pg": "^8.16.0" } }, "sha512-vXtN0OrTF1sdSFgCN8FJkkLmiQQuXqXCPiqM+joi73DdR+m+Y0kcgnVYEKWFEI4i7OQiejQu2/yB3RFUpJMC8w=="],
+    "identitydb": ["identitydb@0.5.2", "", { "dependencies": { "kysely": "^0.28.8", "mysql2": "^3.15.3", "pg": "^8.16.0" } }, "sha512-AkUmmAvpkgtIiHi7l1cTYFQDBYDMSi9HG94IAPWAq8Qa3wHbwaUaDCbPgxJM1ypN63SiW8vBllRTa28W3JXa3Q=="],
 
     "is-interactive": ["is-interactive@2.0.0", "", {}, "sha512-qP1vozQRI+BMOPcjFzrjXuQvdak2pHNUMZoeG2eRbiSqyvbEf/wQtEOTOX1guk6E3t36RkaqiSt8A/6YElNxLQ=="],
 
