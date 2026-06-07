@@ -290,10 +290,18 @@ export class Brain {
       const personaSystemInstruction = await loadPrompt(
         "PERSONA_BASE_SYSTEM_PROMPT",
       );
-      const baseSystemPrompt = await llm.call<string>(llm.models.identity, {
+      const generatedBaseSystemPrompt = await llm.call<string>(
+llm.models.identity,
+{
         instruction: personaSystemInstruction,
         message: description,
-      });
+      },
+      );
+
+      const personaSystemFixed = await loadPrompt(
+        "PERSONA_BASE_SYSTEM_PROMPT_FIXED",
+      );
+      const baseSystemPrompt = `${generatedBaseSystemPrompt}\n\n${personaSystemFixed}`;
 
       const db = await IdentityDB.connect({
         client: "sqlite",
