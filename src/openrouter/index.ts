@@ -3,7 +3,7 @@ import { OpenRouter } from "@openrouter/sdk";
 import type { ChatRequestEffort } from "@openrouter/sdk/models";
 
 const CONVERSATION_MODEL = "x-ai/grok-4.3" as const;
-const IDENTITY_MODEL = "openai/gpt-5.4" as const;
+const IDENTITY_MODEL = "google/gemini-3.5-flash" as const;
 type MODELS = typeof CONVERSATION_MODEL | typeof IDENTITY_MODEL;
 
 type StructuredOptions = {
