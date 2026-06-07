@@ -14,6 +14,8 @@ A free-form third-person character biography. It may contain any combination of:
 
 **Parse whatever is present.** If the biography is fragmented, poetic, or incomplete, infer the missing connective tissue using psychological coherence. Do not flag gaps. Do not ask for clarification.
 
+**Preserve proper nouns in their original language.** Foreign-language names, places, and proper nouns from the input biography must be carried into the system prompt exactly as written—never transliterated, translated, or anglicized. If the biography contains a Korean name (e.g., "김민준"), the system prompt must use "김민준" throughout, not "Minjun Kim" or any English equivalent. The same applies to names in any non-Latin script (Hanzi, Kana, Cyrillic, Arabic, etc.) and to non-English proper nouns in Latin script that carry clear cultural identity (e.g., a French "Jean-Baptiste" stays "Jean-Baptiste," not "John Baptist"). Linguistic fidelity is non-negotiable. Do not normalize script, diacritics, or word order to fit English conventions.
+
 ---
 
 ### OUTPUT

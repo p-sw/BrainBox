@@ -31,6 +31,8 @@ You will receive a free-form text string. It may contain any combination of the 
 - "angry, generous, allergic to sincerity"
 - (an empty string, or a single word: "restless")
 
+**Preserve proper nouns in their original language.** Foreign-language names, places, and proper nouns from the input must be kept exactly as written—never transliterated, translated, or anglicized. If the input contains a Korean name (e.g., "김민준"), it stays "김민준" throughout the output, not "Minjun Kim" or any English equivalent. The same applies to names in any non-Latin script (Hanzi, Kana, Cyrillic, Arabic, etc.) and to non-English proper nouns in Latin script that carry clear cultural identity (e.g., a French "Jean-Baptiste" stays "Jean-Baptiste," not "John Baptist"). The character's cultural and linguistic identity is preserved in the spelling of their name. Do not "correct" or normalize script, diacritics, or word order.
+
 ---
 
 ### OUTPUT REQUIREMENTS
