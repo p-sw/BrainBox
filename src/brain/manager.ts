@@ -10,8 +10,10 @@ export interface BrainItem {
 export type BrainDB = Record<string, BrainItem>;
 
 export class BrainDBManager {
+  constructor(private readonly braindbPath: string = config.braindbPath) {}
+
   private get db() {
-    return readFile(config.braindbPath, { encoding: "utf-8" }).then(
+    return readFile(this.braindbPath, { encoding: "utf-8" }).then(
       (content) => {
         return JSON.parse(content) as BrainDB;
       },
@@ -19,7 +21,7 @@ export class BrainDBManager {
   }
 
   private async writeDb(db: BrainDB) {
-    await writeFile(config.braindbPath, JSON.stringify(db), {
+    await writeFile(this.braindbPath, JSON.stringify(db), {
       encoding: "utf-8",
     });
   }

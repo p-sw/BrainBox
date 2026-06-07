@@ -13,7 +13,7 @@ import {
 } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
 import { factExtractor } from "./factExtractor";
-import { brainManager, type BrainItem } from "./manager";
+import { BrainDBManager, brainManager, type BrainItem } from "./manager";
 import {
   formatDateKey,
   formatMonthKey,
@@ -279,7 +279,12 @@ export class Brain {
   static async create(
     displayName: string,
     seed: string,
+    options: { dbPath?: string; braindbPath?: string } = {},
   ): Promise<Brain | null> {
+    const dbPath = options.dbPath ?? config.dbPath;
+    const manager = options.braindbPath
+      ? new BrainDBManager(options.braindbPath)
+      : brainManager;
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
       const description = await llm.call<string>(llm.models.identity, {
@@ -305,7 +310,7 @@ export class Brain {
 
       const db = await IdentityDB.connect({
         client: "sqlite",
-        filename: config.dbPath,
+        filename: dbPath,
       });
       await db.initialize();
       const brainId = randomUUID();
@@ -326,7 +331,7 @@ export class Brain {
         displayName,
         baseSystemPrompt,
       };
-      await brainManager.saveBrain(brainId, brainbase);
+      await manager.saveBrain(brainId, brainbase);
 
       return new Brain(db, space, brainbase);
     } catch (error) {
