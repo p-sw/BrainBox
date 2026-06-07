@@ -136,6 +136,8 @@ describe("runDebugBrainInit", () => {
     );
 
     expect(result.extractedFacts).toEqual(EXTRACTED_FACTS);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
   test("B2: invokes the LLM exactly 3 times — PERSONA_INIT, PERSONA_BASE_SYSTEM_PROMPT, fact-extractor", async () => {
@@ -194,6 +196,8 @@ describe("runDebugBrainInit", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected !ok");
     expect(result.error).toMatch(/Brain initialization failed/);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
   test("B5: with no DB_PATH / BRAINDB_PATH env, runDebugBrainInit still works (no env dependency)", async () => {
@@ -202,6 +206,9 @@ describe("runDebugBrainInit", () => {
       seed: "no env",
     });
     expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 });
 

@@ -6,6 +6,7 @@ import {
   type DailySchedule,
   type MonthlySchedule,
 } from "@/openrouter/schema";
+import { formatDuration } from "@/utils/duration";
 import { logger } from "@/utils/logger";
 import { formatDateKey, nextMonth, pad2 } from "@/brain/schedule";
 
@@ -22,8 +23,9 @@ export type DailyRunResult =
       tomorrow: Date;
       schedule: DailySchedule;
       availability: AvailabilityWindows;
+      elapsedMs: number;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; elapsedMs: number };
 
 export type MonthlyRunResult =
   | {
@@ -32,12 +34,14 @@ export type MonthlyRunResult =
       monthKey: string;
       daysInMonth: number;
       schedule: MonthlySchedule;
+      elapsedMs: number;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; elapsedMs: number };
 
 export async function runDebugScheduleDaily(
   opts: ScheduleOptions,
 ): Promise<DailyRunResult> {
+  const startTime = Date.now();
   const today = new Date();
   const tomorrow = new Date(
     today.getFullYear(),
@@ -54,7 +58,12 @@ export async function runDebugScheduleDaily(
   const schedule = await brain.createDailySchedule(today, opts.message);
   if (!schedule) {
     scheduleSpinner.fail("Daily schedule generation failed");
-    return { ok: false, error: "Daily schedule generation failed" };
+    const elapsedMs = Date.now() - startTime;
+    return {
+      ok: false,
+      error: "Daily schedule generation failed",
+      elapsedMs,
+    };
   }
   scheduleSpinner.succeed(
     `Daily schedule generated (${schedule.items.length} slots)`,
@@ -69,7 +78,12 @@ export async function runDebugScheduleDaily(
   const availability = await brain.deriveAvailabilityFromSchedule(schedule);
   if (!availability) {
     availSpinner.fail("Availability derivation failed");
-    return { ok: false, error: "Availability derivation failed" };
+    const elapsedMs = Date.now() - startTime;
+    return {
+      ok: false,
+      error: "Availability derivation failed",
+      elapsedMs,
+    };
   }
   availSpinner.succeed(
     `Availability derived (${availability.items.length} windows)`,
@@ -78,7 +92,10 @@ export async function runDebugScheduleDaily(
   printSection(`Availability — ${dateKey}`);
   console.log(JSON.stringify(availability, null, 2));
 
-  logger.info("Debug run complete. Nothing was written to disk.");
+  const elapsedMs = Date.now() - startTime;
+  logger.info(
+    `Debug run complete in ${formatDuration(elapsedMs)}. Nothing was written to disk.`,
+  );
 
   return {
     ok: true,
@@ -87,12 +104,14 @@ export async function runDebugScheduleDaily(
     tomorrow,
     schedule,
     availability,
+    elapsedMs,
   };
 }
 
 export async function runDebugScheduleMonthly(
   opts: ScheduleOptions,
 ): Promise<MonthlyRunResult> {
+  const startTime = Date.now();
   const today = new Date();
   const next = nextMonth(today);
   const monthKey = `${next.year}-${pad2(next.month + 1)}`;
@@ -105,7 +124,12 @@ export async function runDebugScheduleMonthly(
   const schedule = await brain.createMonthlySchedule(today, opts.message);
   if (!schedule) {
     scheduleSpinner.fail("Monthly schedule generation failed");
-    return { ok: false, error: "Monthly schedule generation failed" };
+    const elapsedMs = Date.now() - startTime;
+    return {
+      ok: false,
+      error: "Monthly schedule generation failed",
+      elapsedMs,
+    };
   }
   scheduleSpinner.succeed(
     `Monthly schedule generated (${schedule.items.length} day summaries)`,
@@ -114,8 +138,9 @@ export async function runDebugScheduleMonthly(
   printSection(`Monthly Schedule — ${monthKey} (${next.daysInMonth} days)`);
   console.log(JSON.stringify(schedule, null, 2));
 
+  const elapsedMs = Date.now() - startTime;
   logger.info(
-    "Debug run complete. Nothing was written to disk. (Availability applies per-day and is not generated for the monthly view.)",
+    `Debug run complete in ${formatDuration(elapsedMs)}. Nothing was written to disk. (Availability applies per-day and is not generated for the monthly view.)`,
   );
 
   return {
@@ -124,6 +149,7 @@ export async function runDebugScheduleMonthly(
     monthKey,
     daysInMonth: next.daysInMonth,
     schedule,
+    elapsedMs,
   };
 }
 

@@ -110,6 +110,8 @@ describe("runDebugScheduleDaily", () => {
     expect(result.schedule.items).toHaveLength(48);
     expect(result.availability.items.length).toBeGreaterThan(0);
     expect(result.dateKey).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
 
     const dailyCall = llmCalls.find(
       (c) => c.options.jsonSchemaName === "daily-schedule",
@@ -133,6 +135,8 @@ describe("runDebugScheduleDaily", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected !ok");
     expect(result.error).toMatch(/Daily schedule generation failed/);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -149,6 +153,8 @@ describe("runDebugScheduleMonthly", () => {
     expect(result.kind).toBe("monthly");
     expect(result.schedule.items).toHaveLength(result.daysInMonth);
     expect(result.monthKey).toMatch(/^\d{4}-\d{2}$/);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
 
     const call = llmCalls.find(
       (c) => c.options.jsonSchemaName === "monthly-schedule",
@@ -167,6 +173,8 @@ describe("runDebugScheduleMonthly", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected !ok");
     expect(result.error).toMatch(/Monthly schedule generation failed/);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 });
 

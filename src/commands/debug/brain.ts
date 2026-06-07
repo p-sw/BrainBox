@@ -6,6 +6,7 @@ import type { Command } from "commander";
 import ora from "ora";
 import type { ExtractedFact } from "identitydb";
 import { Brain } from "@/brain";
+import { formatDuration } from "@/utils/duration";
 import { logger } from "@/utils/logger";
 
 export interface BrainInitOptions {
@@ -23,8 +24,9 @@ export type BrainInitResult =
       description: string;
       baseSystemPrompt: string;
       extractedFacts: ExtractedFact[];
+      elapsedMs: number;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; elapsedMs: number };
 
 /**
  * Exercise the full `Brain.create` flow (PERSONA_INIT → PERSONA_BASE_SYSTEM_PROMPT
@@ -44,6 +46,7 @@ export type BrainInitResult =
 export async function runDebugBrainInit(
   opts: BrainInitOptions,
 ): Promise<BrainInitResult> {
+  const startTime = Date.now();
   const braindbPath = join(
     tmpdir(),
     `brainbox-debug-brain-${randomUUID()}.json`,
@@ -60,7 +63,8 @@ export async function runDebugBrainInit(
     });
     if (!result) {
       spinner.fail("Brain initialization failed");
-      return { ok: false, error: "Brain initialization failed" };
+      const elapsedMs = Date.now() - startTime;
+      return { ok: false, error: "Brain initialization failed", elapsedMs };
     }
     const {
       brain,
@@ -101,7 +105,10 @@ export async function runDebugBrainInit(
     }
     console.log();
 
-    logger.info("Debug run complete. Nothing was written to real disk.");
+    const elapsedMs = Date.now() - startTime;
+    logger.info(
+      `Debug run complete in ${formatDuration(elapsedMs)}. Nothing was written to real disk.`,
+    );
 
     return {
       ok: true,
@@ -112,11 +119,13 @@ export async function runDebugBrainInit(
       description,
       baseSystemPrompt,
       extractedFacts: extractedFacts ?? [],
+      elapsedMs,
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     spinner.fail("Brain initialization failed");
-    return { ok: false, error: reason };
+    const elapsedMs = Date.now() - startTime;
+    return { ok: false, error: reason, elapsedMs };
   } finally {
     try {
       await unlink(braindbPath);
