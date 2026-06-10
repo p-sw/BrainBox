@@ -24,6 +24,21 @@ let customAvailability: Array<{
   status: string;
 }> | null = null;
 
+/**
+ * Queue of LLM responses for tool-calling flows (sendMessage). Each entry is
+ * returned in order. Shape matches OpenRouter's `ChatResult.choices[0]`
+ * reduced form: `{ content, tool_calls, finish_reason }`.
+ */
+type ToolCallResponse = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+type LLMChatResponse =
+  | { kind: "text"; text: string }
+  | { kind: "tool_calls"; tool_calls: ToolCallResponse[] };
+let chatResponses: LLMChatResponse[] = [];
+
 function build48Slots(): Array<{
   start: string;
   end: string;
@@ -95,6 +110,32 @@ const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
   if (options.jsonSchemaName === "availability") {
     return { items: customAvailability ?? buildAvailability() } as unknown as T;
   }
+  if (Array.isArray(options.tools)) {
+    const next = chatResponses.shift();
+    if (!next) {
+      throw new Error("mockCall: no chatResponses queued for tool-using call");
+    }
+    if (next.kind === "text") {
+      return {
+        finish_reason: "stop",
+        index: 0,
+        message: { role: "assistant", content: next.text },
+      } as unknown as T;
+    }
+    return {
+      finish_reason: "tool_calls",
+      index: 0,
+      message: {
+        role: "assistant",
+        content: null,
+        toolCalls: next.tool_calls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      },
+    } as unknown as T;
+  }
   throw new Error(`unexpected jsonSchemaName: ${options.jsonSchemaName}`);
 });
 
@@ -102,6 +143,7 @@ mock.module("@/openrouter", () => ({
   llm: {
     models: { conversation: "test-conv", identity: "test-id" },
     call: mockCall,
+    chatWithTools: mockCall,
   },
 }));
 
@@ -126,7 +168,9 @@ beforeAll(async () => {
 
 afterAll(async () => {});
 
-async function makeBrain(): Promise<InstanceType<typeof Brain>> {
+async function makeBrain(
+  embeddingProvider: unknown = NOOP_EMBEDDING_PROVIDER,
+): Promise<InstanceType<typeof Brain>> {
   const db = await IdentityDB.connect({
     client: "sqlite",
     filename: ":memory:",
@@ -141,7 +185,7 @@ async function makeBrain(): Promise<InstanceType<typeof Brain>> {
     baseSystemPrompt:
       "Test personality: night owl, introverted, studies at midnight.",
   };
-  return new Brain(db, space, brainbase);
+  return new Brain(db, space, brainbase, false, embeddingProvider as never);
 }
 
 beforeEach(() => {
@@ -149,6 +193,7 @@ beforeEach(() => {
   customMonthlyDays = null;
   customDailySlots = null;
   customAvailability = null;
+  chatResponses = [];
 });
 
 describe("Brain.createDailySchedule", () => {
@@ -466,5 +511,325 @@ describe("Brain.createDebug", () => {
       { spaceName: brain.space.name },
     );
     expect(facts).toHaveLength(0);
+  });
+});
+
+const NOOP_EMBEDDING_PROVIDER = {
+  model: "test-embed",
+  dimensions: 4,
+  async embed(_input: string): Promise<number[]> {
+    return [0, 0, 0, 0];
+  },
+  async embedMany(inputs: string[]): Promise<number[][]> {
+    return inputs.map(() => [0, 0, 0, 0]);
+  },
+};
+
+const SCORING_EMBEDDING_PROVIDER = {
+  model: "test-embed-scoring",
+  dimensions: 4,
+  async embed(input: string): Promise<number[]> {
+    if (input.includes("coffee")) return [1, 0, 0, 0];
+    if (input.includes("pizza")) return [0, 1, 0, 0];
+    return [0, 0, 1, 0];
+  },
+  async embedMany(inputs: string[]): Promise<number[][]> {
+    return inputs.map((s) => {
+      if (s.includes("coffee")) return [1, 0, 0, 0];
+      if (s.includes("pizza")) return [0, 1, 0, 0];
+      return [0, 0, 1, 0];
+    });
+  },
+};
+
+describe("Brain.sendMessage — translateMessageHistory helper", () => {
+  test("SM1: translateMessageHistory produces the documented format with persona label and timestamps", async () => {
+    const { translateMessageHistory } = await import("./messageHistory");
+    const t1 = new Date(2026, 5, 10, 9, 30, 0);
+    const t2 = new Date(2026, 5, 10, 9, 31, 0);
+    const t3 = new Date(2026, 5, 10, 9, 32, 0);
+    const out = translateMessageHistory("Mika", [
+      { sender: "persona", time: t1, content: "다음에 보자" },
+      { sender: "user", time: t2, content: "그래" },
+      { sender: "user", time: t3, content: "지금 뭐해?" },
+    ]);
+    const lines = out.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]!.startsWith("Mika@")).toBe(true);
+    expect(lines[0]!.endsWith(": 다음에 보자")).toBe(true);
+    expect(lines[1]!.startsWith("사용자@")).toBe(true);
+    expect(lines[1]!.endsWith(": 그래")).toBe(true);
+    expect(lines[2]!.startsWith("사용자@")).toBe(true);
+    expect(lines[2]!.endsWith(": 지금 뭐해?")).toBe(true);
+  });
+
+  test("SM2: translateMessageHistory returns empty string for empty history", async () => {
+    const { translateMessageHistory } = await import("./messageHistory");
+    expect(translateMessageHistory("Mika", [])).toBe("");
+  });
+});
+
+describe("Brain.sendMessage — tool-calling flow", () => {
+  test("SM3: sendMessage returns the LLM's final text when no tools are called", async () => {
+    const brain = await makeBrain();
+    chatResponses = [
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_r1",
+            name: "addReplyMessage",
+            arguments: JSON.stringify({ content: "안녕!" }),
+          },
+        ],
+      },
+      { kind: "text", text: "(end)" },
+    ];
+    const out = await brain.sendMessage(
+      [{ sender: "user", time: new Date(2026, 5, 10, 9, 0, 0), content: "안녕" }],
+      [],
+    );
+    expect(out).toEqual(["안녕!"]);
+    const toolsCall = llmCalls.find(
+      (c) => Array.isArray(c.options.tools) && c.options.tools.length > 0,
+    );
+    expect(toolsCall).toBeDefined();
+    const toolNames = (
+      toolsCall!.options.tools as Array<{
+        function: { name: string };
+      }>
+    ).map((t) => t.function.name);
+    expect(toolNames).toContain("addReplyMessage");
+    expect(toolNames).toContain("searchIdentityDB");
+  });
+
+  test("SM4: sendMessage accumulates addReplyMessage tool calls and returns them in order", async () => {
+    const brain = await makeBrain();
+    chatResponses = [
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_1",
+            name: "addReplyMessage",
+            arguments: JSON.stringify({ content: "어." }),
+          },
+        ],
+      },
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_2",
+            name: "addReplyMessage",
+            arguments: JSON.stringify({ content: "왜불러" }),
+          },
+        ],
+      },
+      { kind: "text", text: "(end)" },
+    ];
+    const out = await brain.sendMessage(
+      [{ sender: "user", time: new Date(2026, 5, 10, 9, 0, 0), content: "야" }],
+      [],
+    );
+    expect(out).toEqual(["어.", "왜불러"]);
+  });
+
+  test("SM5: sendMessage feeds searchIdentityDB tool result back to the LLM", async () => {
+    const brain = await makeBrain(SCORING_EMBEDDING_PROVIDER);
+    const fact = await brain.db.addFact({
+      spaceName: brain.space.name,
+      statement: "사용자는 커피를 좋아한다",
+      summary: "user loves coffee",
+      source: "test",
+      confidence: 1.0,
+      topics: [
+        { name: "사용자", category: "entity", granularity: "concrete" },
+        { name: "커피", category: "concept", granularity: "abstract" },
+      ],
+    });
+    await brain.indexFactEmbeddingFor(fact);
+
+    chatResponses = [
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_s",
+            name: "searchIdentityDB",
+            arguments: JSON.stringify({ query: "커피" }),
+          },
+        ],
+      },
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_r",
+            name: "addReplyMessage",
+            arguments: JSON.stringify({ content: "커피 좋아하잖아" }),
+          },
+        ],
+      },
+      { kind: "text", text: "(end)" },
+    ];
+    const out = await brain.sendMessage(
+      [{ sender: "user", time: new Date(2026, 5, 10, 9, 0, 0), content: "뭐 좋아하는지 알아?" }],
+      [],
+    );
+    expect(out).toEqual(["커피 좋아하잖아"]);
+
+    const toolsCalls = llmCalls.filter(
+      (c) => Array.isArray(c.options.tools) && c.options.tools.length > 0,
+    );
+    expect(toolsCalls.length).toBeGreaterThanOrEqual(2);
+    const messages = toolsCalls[1]!.options.messages as Array<{
+      role: string;
+      content?: string;
+      toolCallId?: string;
+    }>;
+    const toolMsg = messages.find(
+      (m) => m.role === "tool" && m.toolCallId === "call_s",
+    );
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg!.content).toContain("커피");
+  });
+
+  test("SM6: sendMessage with empty history still works and includes translated user messages", async () => {
+    const brain = await makeBrain();
+    chatResponses = [
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_r1",
+            name: "addReplyMessage",
+            arguments: JSON.stringify({ content: "first" }),
+          },
+        ],
+      },
+      { kind: "text", text: "(end)" },
+    ];
+    const out = await brain.sendMessage(
+      [],
+      [
+        {
+          sender: "user",
+          time: new Date(2026, 5, 10, 9, 0, 0),
+          content: "하이",
+        },
+      ],
+    );
+    expect(out).toEqual(["first"]);
+    const toolsCall = llmCalls.find(
+      (c) => Array.isArray(c.options.tools) && c.options.tools.length > 0,
+    );
+    expect(toolsCall).toBeDefined();
+    const userMsg = (
+      toolsCall!.options.messages as Array<{ role: string; content?: string }>
+    ).find((m) => m.role === "user");
+    expect(userMsg!.content).toContain("사용자@");
+    expect(userMsg!.content).toContain("하이");
+  });
+
+  test("SM7: createDailySchedule auto-indexes the new fact so it is searchable via the provider", async () => {
+    const brain = await makeBrain(SCORING_EMBEDDING_PROVIDER);
+    const today = new Date(2026, 5, 5);
+    const tomorrow = new Date(2026, 5, 6);
+    const tomorrowKey = formatDateKey(tomorrow);
+
+    customDailySlots = build48Slots();
+    await brain.createDailySchedule(today, "msg");
+
+    const hits = await brain.db.searchFacts({
+      spaceName: brain.space.name,
+      query: "slot-0",
+      provider: SCORING_EMBEDDING_PROVIDER as never,
+      limit: 5,
+    });
+    expect(hits.length).toBeGreaterThan(0);
+    const matched = hits.find((h) =>
+      h.statement.includes(`"activity":"slot-0"`),
+    );
+    expect(matched).toBeDefined();
+
+    const topicFacts = await brain.db.getTopicFacts(
+      `daily-schedule:${tomorrowKey}`,
+      { spaceName: brain.space.name },
+    );
+    expect(topicFacts).toHaveLength(1);
+  });
+
+  test("SM8: sendMessage no longer calls indexFactEmbeddings on every turn (uses per-fact init)", async () => {
+    const brain = await makeBrain(NOOP_EMBEDDING_PROVIDER);
+    let embedManyCalls = 0;
+    const trackingProvider = {
+      model: "track-embed",
+      dimensions: 4,
+      async embed(_input: string): Promise<number[]> {
+        return [0, 0, 0, 0];
+      },
+      async embedMany(inputs: string[]): Promise<number[][]> {
+        embedManyCalls += 1;
+        return inputs.map(() => [0, 0, 0, 0]);
+      },
+    };
+    Object.defineProperty(brain, "embeddingProvider", {
+      value: trackingProvider,
+      configurable: true,
+    });
+
+    chatResponses = [
+      {
+        kind: "tool_calls",
+        tool_calls: [
+          {
+            id: "call_r1",
+            name: "addReplyMessage",
+            arguments: JSON.stringify({ content: "ok" }),
+          },
+        ],
+      },
+      { kind: "text", text: "(end)" },
+    ];
+    await brain.sendMessage(
+      [{ sender: "user", time: new Date(2026, 5, 10, 9, 0, 0), content: "hi" }],
+      [],
+    );
+    expect(embedManyCalls).toBe(0);
+  });
+
+  test("SM9: initializeEmbeddings backfills missing embeddings for facts added out-of-band", async () => {
+    const brain = await makeBrain(SCORING_EMBEDDING_PROVIDER);
+    await brain.db.addFact({
+      spaceName: brain.space.name,
+      statement: "사용자는 피자를 좋아한다",
+      summary: "user loves pizza",
+      source: "test",
+      confidence: 1.0,
+      topics: [
+        { name: "사용자", category: "entity", granularity: "concrete" },
+        { name: "피자", category: "concept", granularity: "abstract" },
+      ],
+    });
+
+    let preInitHits = await brain.db.searchFacts({
+      spaceName: brain.space.name,
+      query: "피자",
+      provider: SCORING_EMBEDDING_PROVIDER as never,
+      limit: 5,
+    });
+    expect(preInitHits).toHaveLength(0);
+
+    await brain.initializeEmbeddings();
+
+    const postInitHits = await brain.db.searchFacts({
+      spaceName: brain.space.name,
+      query: "피자",
+      provider: SCORING_EMBEDDING_PROVIDER as never,
+      limit: 5,
+    });
+    expect(postInitHits.length).toBeGreaterThan(0);
+    expect(postInitHits[0]!.statement).toContain("피자");
   });
 });

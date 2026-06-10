@@ -87,6 +87,19 @@ mock.module("@/config", () => ({
   },
 }));
 
+mock.module("@/openrouter/embedding", () => ({
+  OpenRouterEmbeddingProvider: class {
+    model = "test-embed";
+    dimensions = 4;
+    async embed(_input: string): Promise<number[]> {
+      return [0, 0, 0, 0];
+    }
+    async embedMany(inputs: string[]): Promise<number[][]> {
+      return inputs.map(() => [0, 0, 0, 0]);
+    }
+  },
+}));
+
 const { runDebugBrainInit } = await import("./brain");
 const { Brain: ProdBrain } = await import("@/brain");
 
