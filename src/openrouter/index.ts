@@ -1,6 +1,12 @@
 import { config } from "@/config";
 import { OpenRouter } from "@openrouter/sdk";
-import type { ChatRequestEffort } from "@openrouter/sdk/models";
+import type {
+  ChatAssistantMessage,
+  ChatChoice,
+  ChatFunctionTool,
+  ChatMessages,
+  ChatRequestEffort,
+} from "@openrouter/sdk/models";
 
 const CONVERSATION_MODEL = "x-ai/grok-4.3" as const;
 const IDENTITY_MODEL = "openai/gpt-5.4-mini" as const;
@@ -21,6 +27,14 @@ type StructuredOptions = {
     }
   | {}
 );
+
+type ChatWithToolsOptions = {
+  instruction: string;
+  messages: ChatMessages[];
+  tools: ChatFunctionTool[];
+  reasoningEffort?: ChatRequestEffort;
+  parallelToolCalls?: boolean;
+};
 
 export class LLMExecutor {
   models = {
@@ -81,6 +95,46 @@ export class LLMExecutor {
       return content as T;
     }
   }
+
+  async chatWithTools(
+    model: MODELS,
+    options: ChatWithToolsOptions,
+  ): Promise<ChatChoice> {
+    const result = await this.client.chat.send({
+      chatRequest: {
+        model,
+        messages: [
+          {
+            role: "system",
+            content: options.instruction,
+          },
+          ...options.messages,
+        ],
+        reasoning: {
+          effort:
+            options.reasoningEffort ??
+            (model === IDENTITY_MODEL ? "medium" : "none"),
+        },
+        responseFormat: { type: "text" },
+        tools: options.tools,
+        parallelToolCalls: options.parallelToolCalls ?? false,
+        stream: false,
+      },
+    });
+
+    const choice = result.choices[0];
+    if (!choice) {
+      throw new Error("LLM returned no choice");
+    }
+    return choice;
+  }
 }
+
+export type {
+  ChatAssistantMessage,
+  ChatChoice,
+  ChatFunctionTool,
+  ChatMessages,
+};
 
 export const llm = new LLMExecutor(config.openrouterApiKey);
