@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { IdentityDB, type Space } from "identitydb";
+import type { Space } from "./types";
 
 const llmCalls: Array<{ model: unknown; options: any }> = [];
 let customMonthlyDays: Array<{ day: number; summary: string }> | null = null;
@@ -24,11 +24,6 @@ let customAvailability: Array<{
   status: string;
 }> | null = null;
 
-/**
- * Queue of LLM responses for tool-calling flows (sendMessage). Each entry is
- * returned in order. Shape matches OpenRouter's `ChatResult.choices[0]`
- * reduced form: `{ content, tool_calls, finish_reason }`.
- */
 type ToolCallResponse = {
   id: string;
   name: string;
@@ -136,6 +131,9 @@ const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
       },
     } as unknown as T;
   }
+  if (typeof options.message === "string" || options.message === undefined) {
+    return "test-description" as unknown as T;
+  }
   throw new Error(`unexpected jsonSchemaName: ${options.jsonSchemaName}`);
 });
 
@@ -150,14 +148,191 @@ mock.module("@/openrouter", () => ({
 mock.module("@/config", () => ({
   config: {
     openrouterApiKey: "test-key",
-    dbPath: ":memory:",
+    supermemoryApiKey: "test-supermemory-key",
     braindbPath: "/tmp/brainbox-test-braindb.json",
   },
 }));
 
+interface StoredDoc {
+  id: string;
+  customId: string | null;
+  containerTag: string;
+  content: string;
+  summary: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+class MockSupermemory {
+  docs = new Map<string, StoredDoc>();
+  private nextId = 0;
+  documentsAddCalls = 0;
+
+  constructor(_options: { apiKey: string }) {}
+
+  documents = {
+    add: async (params: {
+      content: string;
+      containerTag: string;
+      customId?: string;
+      metadata?: Record<string, unknown>;
+    }) => {
+      this.documentsAddCalls += 1;
+      const id = `mock-${++this.nextId}`;
+      const stored: StoredDoc = {
+        id,
+        customId: params.customId ?? null,
+        containerTag: params.containerTag,
+        content: params.content,
+        summary: null,
+        metadata: params.metadata ?? null,
+      };
+      this.docs.set(id, stored);
+      return { id, status: "done" };
+    },
+    list: async (params: {
+      containerTags?: Array<string>;
+      limit?: number;
+    }) => {
+      const tags = params.containerTags ?? [];
+      const limit = params.limit ?? 200;
+      const all = Array.from(this.docs.values()).filter((d) =>
+        tags.length === 0 ? true : tags.includes(d.containerTag),
+      );
+      const memories = all.slice(0, limit).map((d) => ({
+        id: d.id,
+        customId: d.customId,
+        containerTag: d.containerTag,
+        summary: d.summary,
+        metadata: d.metadata as
+          | string
+          | number
+          | boolean
+          | Record<string, unknown>
+          | Array<unknown>
+          | null,
+        content: d.content,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        status: "done" as const,
+        type: "text" as const,
+        connectionId: null,
+        filepath: null,
+        title: null,
+      }));
+      return {
+        memories,
+        pagination: {
+          currentPage: 1,
+          totalItems: memories.length,
+          totalPages: 1,
+          limit,
+        },
+      };
+    },
+    get: async (id: string) => {
+      const d = this.docs.get(id);
+      if (!d) {
+        throw new Error(`MockSupermemory.documents.get: no such id ${id}`);
+      }
+      return {
+        id: d.id,
+        customId: d.customId,
+        containerTag: d.containerTag,
+        content: d.content,
+        summary: d.summary,
+        metadata: d.metadata as
+          | string
+          | number
+          | boolean
+          | Record<string, unknown>
+          | Array<unknown>
+          | null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        status: "done" as const,
+        type: "text" as const,
+        connectionId: null,
+        filepath: null,
+        title: null,
+        source: null,
+        ogImage: null,
+        raw: null,
+        spatialPoint: null,
+        taskType: "memory" as const,
+        url: null,
+      };
+    },
+  };
+
+  search = {
+    execute: async (params: {
+      q: string;
+      containerTag?: string;
+      limit?: number;
+      onlyMatchingChunks?: boolean;
+    }) => {
+      const q = params.q.toLowerCase();
+      const limit = params.limit ?? 5;
+      const hits = Array.from(this.docs.values())
+        .filter(
+          (d) =>
+            (params.containerTag
+              ? d.containerTag === params.containerTag
+              : true) && d.content.toLowerCase().includes(q),
+        )
+        .slice(0, limit)
+        .map((d, i) => ({
+          chunks: [
+            {
+              content: d.content,
+              isRelevant: true,
+              score: 1 - i * 0.1,
+            },
+          ],
+          summary: d.summary,
+          score: 1 - i * 0.1,
+          documentId: d.id,
+          metadata: (d.metadata as Record<string, unknown>) ?? null,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          title: d.customId,
+          type: "text" as const,
+        }));
+      return {
+        results: hits,
+        total: hits.length,
+        timing: 0,
+      };
+    },
+  };
+
+  findByCustomId(customId: string): StoredDoc | undefined {
+    for (const d of this.docs.values()) {
+      if (d.customId === customId) return d;
+    }
+    return undefined;
+  }
+
+  reset(): void {
+    this.docs.clear();
+    this.nextId = 0;
+    this.documentsAddCalls = 0;
+  }
+}
+
+/**
+ * Replace the real `supermemory` SDK with our in-memory mock. The
+ * static factories `Brain.create` / `Brain.createDebug` / `Brain.load`
+ * all do `new Supermemory({ apiKey })` internally; this mock is what
+ * they pick up.
+ */
+mock.module("supermemory", () => ({
+  default: MockSupermemory,
+}));
+
 const { Brain } = await import("./index");
 const { brainManager } = await import("./manager");
-const { formatDateKey, nextDay, nextMonth } = await import("./schedule");
+const { formatDateKey, nextMonth } = await import("./schedule");
 type BrainItem = import("./manager").BrainItem;
 
 beforeAll(async () => {
@@ -168,16 +343,10 @@ beforeAll(async () => {
 
 afterAll(async () => {});
 
-async function makeBrain(
-  embeddingProvider: unknown = NOOP_EMBEDDING_PROVIDER,
-): Promise<InstanceType<typeof Brain>> {
-  const db = await IdentityDB.connect({
-    client: "sqlite",
-    filename: ":memory:",
-  });
-  await db.initialize();
+async function makeBrain(): Promise<InstanceType<typeof Brain>> {
+  const db = new MockSupermemory({ apiKey: "test-supermemory-key" });
   const spaceName = `test-space-${randomUUID()}`;
-  const space: Space = await db.upsertSpace({ name: spaceName });
+  const space: Space = { name: spaceName, description: "Test Brain space" };
   const brainbase: BrainItem = {
     brainId: randomUUID(),
     spaceName,
@@ -185,7 +354,7 @@ async function makeBrain(
     baseSystemPrompt:
       "Test personality: night owl, introverted, studies at midnight.",
   };
-  return new Brain(db, space, brainbase, false, embeddingProvider as never);
+  return new Brain(db as never, space, brainbase, false);
 }
 
 beforeEach(() => {
@@ -197,10 +366,11 @@ beforeEach(() => {
 });
 
 describe("Brain.createDailySchedule", () => {
-  test("S1: returns 48 slots in 30-min intervals and persists a fact", async () => {
+  test("S1: returns 48 slots in 30-min intervals and persists a document", async () => {
     const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 5, 5);
-    const expectedTomorrow = nextDay(today);
+    const expectedTomorrow = (await import("./schedule")).nextDay(today);
     const expectedKey = formatDateKey(expectedTomorrow);
 
     const result = await brain.createDailySchedule(today, "focus on writing");
@@ -228,50 +398,39 @@ describe("Brain.createDailySchedule", () => {
     expect(llmCall!.options.message).toContain("focus on writing");
     expect(llmCall!.options.message).toContain("Test personality");
 
-    const facts = await brain.db.getTopicFacts(
-      `daily-schedule:${expectedKey}`,
-      {
-        spaceName: brain.space.name,
-      },
-    );
-    expect(facts).toHaveLength(1);
-    expect(JSON.parse(facts[0]!.statement).items).toHaveLength(48);
+    const stored = db.findByCustomId(`daily-schedule:${expectedKey}`);
+    expect(stored).toBeDefined();
+    expect(stored!.containerTag).toBe(brain.space.name);
+    expect(JSON.parse(stored!.content).items).toHaveLength(48);
   });
 
   test("S4: month wrap (June 30 -> July 1)", async () => {
     const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 5, 30);
     const expectedKey = formatDateKey(new Date(2026, 6, 1));
 
     await brain.createDailySchedule(today, "");
 
-    const facts = await brain.db.getTopicFacts(
-      `daily-schedule:${expectedKey}`,
-      {
-        spaceName: brain.space.name,
-      },
-    );
-    expect(facts).toHaveLength(1);
+    const stored = db.findByCustomId(`daily-schedule:${expectedKey}`);
+    expect(stored).toBeDefined();
   });
 
   test("S4b: year wrap (December 31 -> January 1 next year)", async () => {
     const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 11, 31);
     const expectedKey = "2027-01-01";
 
     await brain.createDailySchedule(today, "");
 
-    const facts = await brain.db.getTopicFacts(
-      `daily-schedule:${expectedKey}`,
-      {
-        spaceName: brain.space.name,
-      },
-    );
-    expect(facts).toHaveLength(1);
+    const stored = db.findByCustomId(`daily-schedule:${expectedKey}`);
+    expect(stored).toBeDefined();
   });
 
   test("S6: consumes monthly summary for the target day when present", async () => {
     const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
 
     customMonthlyDays = Array.from({ length: 30 }, (_, i) => ({
       day: i + 1,
@@ -282,13 +441,8 @@ describe("Brain.createDailySchedule", () => {
     const todayForMonthly = new Date(2026, 4, 15);
     await brain.createMonthlySchedule(todayForMonthly, "");
 
-    const monthlyFacts = await brain.db.getTopicFacts(
-      `monthly-schedule:2026-06`,
-      {
-        spaceName: brain.space.name,
-      },
-    );
-    expect(monthlyFacts).toHaveLength(1);
+    const monthlyStored = db.findByCustomId("monthly-schedule:2026-06");
+    expect(monthlyStored).toBeDefined();
 
     llmCalls.length = 0;
     customDailySlots = build48Slots();
@@ -304,11 +458,63 @@ describe("Brain.createDailySchedule", () => {
       "UNIQUE_SUMMARY_FOR_DAY_10",
     );
   });
+
+  test("S9: injects 2-days-ago schedule as recent context when one exists", async () => {
+    const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
+
+    const twoDaysAgoTarget = new Date(2026, 5, 7);
+    const twoDaysAgoTomorrow = (await import("./schedule")).nextDay(
+      twoDaysAgoTarget,
+    );
+    const twoDaysAgoKey = formatDateKey(twoDaysAgoTomorrow);
+
+    await brain.add({
+      customId: `daily-schedule:${twoDaysAgoKey}`,
+      content: JSON.stringify({
+        items: Array.from({ length: 48 }, (_, i) => ({
+          start: `${String(Math.floor(i / 2)).padStart(2, "0")}:${String((i % 2) * 30).padStart(2, "0")}`,
+          end: `${String(Math.floor((i + 1) / 2)).padStart(2, "0")}:${String(((i + 1) % 2) * 30).padStart(2, "0")}`,
+          activity: `prior-day-activity-${i}`,
+          notes: "",
+        })),
+      }),
+      metadata: { kind: "schedule", source: "createDailySchedule", date: twoDaysAgoKey },
+    });
+
+    llmCalls.length = 0;
+    const today = new Date(2026, 5, 9);
+    await brain.createDailySchedule(today, "");
+
+    const dailyLlmCall = llmCalls.find(
+      (c) => c.options.jsonSchemaName === "daily-schedule",
+    );
+    expect(dailyLlmCall).toBeDefined();
+    expect(dailyLlmCall!.options.message).toContain(
+      `Recent schedule (${twoDaysAgoKey}, 2 days ago):`,
+    );
+    expect(dailyLlmCall!.options.message).toContain("prior-day-activity-0");
+  });
+
+  test("S10: 2-days-ago context says 'no schedule on file' when prior day is missing", async () => {
+    const brain = await makeBrain();
+    const today = new Date(2026, 5, 9);
+    await brain.createDailySchedule(today, "");
+
+    const dailyLlmCall = llmCalls.find(
+      (c) => c.options.jsonSchemaName === "daily-schedule",
+    );
+    expect(dailyLlmCall).toBeDefined();
+    expect(dailyLlmCall!.options.message).toContain(
+      "(no schedule on file for 2 days ago)",
+    );
+  });
 });
 
 describe("Brain.createMonthlySchedule", () => {
-  test("S2: returns N day summaries (N = days in next month) and persists a fact", async () => {
+  test("S2: returns N day summaries (N = days in next month) and persists a document", async () => {
     const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 0, 15);
     const expected = nextMonth(today);
     const expectedKey = `${expected.year}-${String(expected.month + 1).padStart(2, "0")}`;
@@ -329,20 +535,16 @@ describe("Brain.createMonthlySchedule", () => {
     expect(llmCall!.options.message).toContain("study for GRE");
     expect(llmCall!.options.message).toContain("Test personality");
 
-    const facts = await brain.db.getTopicFacts(
-      `monthly-schedule:${expectedKey}`,
-      {
-        spaceName: brain.space.name,
-      },
-    );
-    expect(facts).toHaveLength(1);
-    expect(JSON.parse(facts[0]!.statement).items).toHaveLength(
+    const stored = db.findByCustomId(`monthly-schedule:${expectedKey}`);
+    expect(stored).toBeDefined();
+    expect(JSON.parse(stored!.content).items).toHaveLength(
       expected.daysInMonth,
     );
   });
 
   test("S5: year wrap (December 15 -> January next year)", async () => {
     const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 11, 15);
     const expectedKey = "2027-01";
 
@@ -351,13 +553,8 @@ describe("Brain.createMonthlySchedule", () => {
     expect(result).not.toBeNull();
     expect(result!.items).toHaveLength(31);
 
-    const facts = await brain.db.getTopicFacts(
-      `monthly-schedule:${expectedKey}`,
-      {
-        spaceName: brain.space.name,
-      },
-    );
-    expect(facts).toHaveLength(1);
+    const stored = db.findByCustomId(`monthly-schedule:${expectedKey}`);
+    expect(stored).toBeDefined();
   });
 });
 
@@ -366,25 +563,14 @@ describe("Brain.getTodayScheduledAvailability", () => {
     const brain = await makeBrain();
     const today = new Date(2026, 5, 10);
     const todayKey = formatDateKey(today);
-    await brain.db.addFact({
-      spaceName: brain.space.name,
-      statement: JSON.stringify({ items: build48Slots() }),
-      summary: "test daily",
-      source: "test",
-      confidence: 1.0,
-      topics: [
-        {
-          name: `daily-schedule:${todayKey}`,
-          category: "temporal",
-          granularity: "concrete",
-        },
-        {
-          name: "daily-schedule",
-          category: "concept",
-          granularity: "abstract",
-        },
-        { name: todayKey, category: "temporal", granularity: "concrete" },
-      ],
+    await brain.add({
+      customId: `daily-schedule:${todayKey}`,
+      content: JSON.stringify({ items: build48Slots() }),
+      metadata: {
+        kind: "schedule",
+        source: "test",
+        date: todayKey,
+      },
     });
 
     const result = await brain.getTodayScheduledAvailability(today);
@@ -417,25 +603,14 @@ describe("Brain.removeScheduledAvailability", () => {
     const brain = await makeBrain();
     const today = new Date(2026, 5, 10);
     const todayKey = formatDateKey(today);
-    await brain.db.addFact({
-      spaceName: brain.space.name,
-      statement: JSON.stringify({ items: build48Slots() }),
-      summary: "test daily",
-      source: "test",
-      confidence: 1.0,
-      topics: [
-        {
-          name: `daily-schedule:${todayKey}`,
-          category: "temporal",
-          granularity: "concrete",
-        },
-        {
-          name: "daily-schedule",
-          category: "concept",
-          granularity: "abstract",
-        },
-        { name: todayKey, category: "temporal", granularity: "concrete" },
-      ],
+    await brain.add({
+      customId: `daily-schedule:${todayKey}`,
+      content: JSON.stringify({ items: build48Slots() }),
+      metadata: {
+        kind: "schedule",
+        source: "test",
+        date: todayKey,
+      },
     });
 
     const r1 = await brain.getTodayScheduledAvailability(today);
@@ -463,25 +638,19 @@ describe("S8: regression on existing methods", () => {
 });
 
 describe("Brain.createDebug", () => {
-  test("D1: returns a Brain with debug=true, the supplied personality, and no disk file created", async () => {
-    const { existsSync } = await import("fs");
-    const { resolve } = await import("path");
-
-    const before = existsSync(resolve(process.cwd(), "brainbox.db"));
-
+  test("D1: returns a Brain with debug=true and the supplied personality under the brain:debug namespace", async () => {
     const brain = await Brain.createDebug({ personality: "test-personality-Q" });
 
     expect(brain).toBeInstanceOf(Brain);
     expect(brain.debug).toBe(true);
     expect(brain.brainbase.baseSystemPrompt).toBe("test-personality-Q");
     expect(brain.brainbase.displayName).toBe("Debug Brain");
-
-    const after = existsSync(resolve(process.cwd(), "brainbox.db"));
-    expect(after).toBe(before);
+    expect(brain.space.name).toBe("brain:debug");
   });
 
-  test("D2: createDailySchedule on a debug brain returns a schedule and does NOT add a fact to the DB", async () => {
+  test("D2: createDailySchedule on a debug brain returns a schedule and persists to brain:debug", async () => {
     const brain = await Brain.createDebug({ personality: "p" });
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 5, 5);
     const tomorrow = new Date(2026, 5, 6);
     const tomorrowKey = formatDateKey(tomorrow);
@@ -490,14 +659,14 @@ describe("Brain.createDebug", () => {
     expect(schedule).not.toBeNull();
     expect(schedule!.items).toHaveLength(48);
 
-    const facts = await brain.db.getTopicFacts(`daily-schedule:${tomorrowKey}`, {
-      spaceName: brain.space.name,
-    });
-    expect(facts).toHaveLength(0);
+    const stored = db.findByCustomId(`daily-schedule:${tomorrowKey}`);
+    expect(stored).toBeDefined();
+    expect(stored!.containerTag).toBe("brain:debug");
   });
 
-  test("D3: createMonthlySchedule on a debug brain returns a schedule and does NOT add a fact to the DB", async () => {
+  test("D3: createMonthlySchedule on a debug brain returns a schedule and persists to brain:debug", async () => {
     const brain = await Brain.createDebug({ personality: "p" });
+    const db = brain.db as unknown as MockSupermemory;
     const today = new Date(2026, 0, 15);
     const expected = nextMonth(today);
     const monthKey = `${expected.year}-${String(expected.month + 1).padStart(2, "0")}`;
@@ -506,41 +675,11 @@ describe("Brain.createDebug", () => {
     expect(schedule).not.toBeNull();
     expect(schedule!.items).toHaveLength(expected.daysInMonth);
 
-    const facts = await brain.db.getTopicFacts(
-      `monthly-schedule:${monthKey}`,
-      { spaceName: brain.space.name },
-    );
-    expect(facts).toHaveLength(0);
+    const stored = db.findByCustomId(`monthly-schedule:${monthKey}`);
+    expect(stored).toBeDefined();
+    expect(stored!.containerTag).toBe("brain:debug");
   });
 });
-
-const NOOP_EMBEDDING_PROVIDER = {
-  model: "test-embed",
-  dimensions: 4,
-  async embed(_input: string): Promise<number[]> {
-    return [0, 0, 0, 0];
-  },
-  async embedMany(inputs: string[]): Promise<number[][]> {
-    return inputs.map(() => [0, 0, 0, 0]);
-  },
-};
-
-const SCORING_EMBEDDING_PROVIDER = {
-  model: "test-embed-scoring",
-  dimensions: 4,
-  async embed(input: string): Promise<number[]> {
-    if (input.includes("coffee")) return [1, 0, 0, 0];
-    if (input.includes("pizza")) return [0, 1, 0, 0];
-    return [0, 0, 1, 0];
-  },
-  async embedMany(inputs: string[]): Promise<number[][]> {
-    return inputs.map((s) => {
-      if (s.includes("coffee")) return [1, 0, 0, 0];
-      if (s.includes("pizza")) return [0, 1, 0, 0];
-      return [0, 0, 1, 0];
-    });
-  },
-};
 
 describe("Brain.sendMessage — translateMessageHistory helper", () => {
   test("SM1: translateMessageHistory produces the documented format with persona label and timestamps", async () => {
@@ -600,7 +739,7 @@ describe("Brain.sendMessage — tool-calling flow", () => {
       }>
     ).map((t) => t.function.name);
     expect(toolNames).toContain("addReplyMessage");
-    expect(toolNames).toContain("searchIdentityDB");
+    expect(toolNames).toContain("searchMemory");
   });
 
   test("SM4: sendMessage accumulates addReplyMessage tool calls and returns them in order", async () => {
@@ -635,20 +774,13 @@ describe("Brain.sendMessage — tool-calling flow", () => {
     expect(out).toEqual(["어.", "왜불러"]);
   });
 
-  test("SM5: sendMessage feeds searchIdentityDB tool result back to the LLM", async () => {
-    const brain = await makeBrain(SCORING_EMBEDDING_PROVIDER);
-    const fact = await brain.db.addFact({
-      spaceName: brain.space.name,
-      statement: "사용자는 커피를 좋아한다",
-      summary: "user loves coffee",
-      source: "test",
-      confidence: 1.0,
-      topics: [
-        { name: "사용자", category: "entity", granularity: "concrete" },
-        { name: "커피", category: "concept", granularity: "abstract" },
-      ],
+  test("SM5: sendMessage feeds searchMemory tool result back to the LLM", async () => {
+    const brain = await makeBrain();
+    await brain.add({
+      customId: "fact-coffee",
+      content: "사용자는 커피를 좋아한다",
+      metadata: { kind: "fact", source: "test" },
     });
-    await brain.indexFactEmbeddingFor(fact);
 
     chatResponses = [
       {
@@ -656,7 +788,7 @@ describe("Brain.sendMessage — tool-calling flow", () => {
         tool_calls: [
           {
             id: "call_s",
-            name: "searchIdentityDB",
+            name: "searchMemory",
             arguments: JSON.stringify({ query: "커피" }),
           },
         ],
@@ -732,8 +864,8 @@ describe("Brain.sendMessage — tool-calling flow", () => {
     expect(userMsg!.content).toContain("하이");
   });
 
-  test("SM7: createDailySchedule auto-indexes the new fact so it is searchable via the provider", async () => {
-    const brain = await makeBrain(SCORING_EMBEDDING_PROVIDER);
+  test("SM7: createDailySchedule persists a document reachable via brain.get", async () => {
+    const brain = await makeBrain();
     const today = new Date(2026, 5, 5);
     const tomorrow = new Date(2026, 5, 6);
     const tomorrowKey = formatDateKey(tomorrow);
@@ -741,43 +873,20 @@ describe("Brain.sendMessage — tool-calling flow", () => {
     customDailySlots = build48Slots();
     await brain.createDailySchedule(today, "msg");
 
-    const hits = await brain.db.searchFacts({
-      spaceName: brain.space.name,
-      query: "slot-0",
-      provider: SCORING_EMBEDDING_PROVIDER as never,
-      limit: 5,
+    const stored = await brain.get(`daily-schedule:${tomorrowKey}`);
+    expect(stored).not.toBeNull();
+    expect(stored!.content).toContain("slot-0");
+    expect(stored!.metadata).toEqual({
+      kind: "schedule",
+      source: "createDailySchedule",
+      date: tomorrowKey,
     });
-    expect(hits.length).toBeGreaterThan(0);
-    const matched = hits.find((h) =>
-      h.statement.includes(`"activity":"slot-0"`),
-    );
-    expect(matched).toBeDefined();
-
-    const topicFacts = await brain.db.getTopicFacts(
-      `daily-schedule:${tomorrowKey}`,
-      { spaceName: brain.space.name },
-    );
-    expect(topicFacts).toHaveLength(1);
   });
 
-  test("SM8: sendMessage no longer calls indexFactEmbeddings on every turn (uses per-fact init)", async () => {
-    const brain = await makeBrain(NOOP_EMBEDDING_PROVIDER);
-    let embedManyCalls = 0;
-    const trackingProvider = {
-      model: "track-embed",
-      dimensions: 4,
-      async embed(_input: string): Promise<number[]> {
-        return [0, 0, 0, 0];
-      },
-      async embedMany(inputs: string[]): Promise<number[][]> {
-        embedManyCalls += 1;
-        return inputs.map(() => [0, 0, 0, 0]);
-      },
-    };
-    Object.defineProperty(brain, "embeddingProvider", {
-      value: trackingProvider,
-      configurable: true,
-    });
+  test("SM8: sendMessage does not call brain.add (no documents added during chat)", async () => {
+    const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
+    const before = db.documentsAddCalls;
 
     chatResponses = [
       {
@@ -796,40 +905,19 @@ describe("Brain.sendMessage — tool-calling flow", () => {
       [{ sender: "user", time: new Date(2026, 5, 10, 9, 0, 0), content: "hi" }],
       [],
     );
-    expect(embedManyCalls).toBe(0);
+    expect(db.documentsAddCalls - before).toBe(0);
   });
 
-  test("SM9: initializeEmbeddings backfills missing embeddings for facts added out-of-band", async () => {
-    const brain = await makeBrain(SCORING_EMBEDDING_PROVIDER);
-    await brain.db.addFact({
-      spaceName: brain.space.name,
-      statement: "사용자는 피자를 좋아한다",
-      summary: "user loves pizza",
-      source: "test",
-      confidence: 1.0,
-      topics: [
-        { name: "사용자", category: "entity", granularity: "concrete" },
-        { name: "피자", category: "concept", granularity: "abstract" },
-      ],
+  test("SM9: out-of-band add() facts are queryable via brain.search without backfill", async () => {
+    const brain = await makeBrain();
+    await brain.add({
+      customId: "fact-pizza",
+      content: "사용자는 피자를 좋아한다",
+      metadata: { kind: "fact", source: "test" },
     });
 
-    let preInitHits = await brain.db.searchFacts({
-      spaceName: brain.space.name,
-      query: "피자",
-      provider: SCORING_EMBEDDING_PROVIDER as never,
-      limit: 5,
-    });
-    expect(preInitHits).toHaveLength(0);
-
-    await brain.initializeEmbeddings();
-
-    const postInitHits = await brain.db.searchFacts({
-      spaceName: brain.space.name,
-      query: "피자",
-      provider: SCORING_EMBEDDING_PROVIDER as never,
-      limit: 5,
-    });
-    expect(postInitHits.length).toBeGreaterThan(0);
-    expect(postInitHits[0]!.statement).toContain("피자");
+    const hits = await brain.search("피자", 5);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.content).toContain("피자");
   });
 });

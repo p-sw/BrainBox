@@ -1,8 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { existsSync, readdirSync } from "fs";
-import { unlink, writeFile } from "fs/promises";
-import type { ExtractedFact } from "identitydb";
 import { tmpdir } from "os";
 
 interface RecordedCall {
@@ -19,36 +16,6 @@ const llmCalls: RecordedCall[] = [];
 const PERSONA_DESCRIPTION = "A 34yo night-shift nurse, hides exhaustion behind sarcasm.";
 const GENERATED_BASE_SYSTEM_PROMPT =
   "You are Maren. You text in lowercase. You use '...' when tired.";
-const EXTRACTED_FACTS: ExtractedFact[] = [
-  {
-    statement: "Maren is 34 years old.",
-    summary: "Maren is 34 years old.",
-    source: "persona-init",
-    confidence: 1.0,
-    topics: [
-      {
-        name: "maren-age",
-        category: "temporal",
-        granularity: "concrete",
-        role: "attribute",
-      },
-    ],
-  },
-  {
-    statement: "Maren is a night-shift nurse.",
-    summary: "Maren is a night-shift nurse.",
-    source: "persona-init",
-    confidence: 1.0,
-    topics: [
-      {
-        name: "maren-occupation",
-        category: "entity",
-        granularity: "concrete",
-        role: "attribute",
-      },
-    ],
-  },
-];
 
 const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
   llmCalls.push({ model, options });
@@ -63,9 +30,6 @@ const mockCall = mock(async <T>(model: unknown, options: any): Promise<T> => {
     options.instruction?.includes("LLM character embodiment")
   ) {
     return GENERATED_BASE_SYSTEM_PROMPT as unknown as T;
-  }
-  if (options.jsonSchemaName === "fact-extractor") {
-    return { items: EXTRACTED_FACTS } as unknown as T;
   }
   throw new Error(
     `unexpected LLM call: model=${model} instruction=${options.instruction?.slice(0, 80)}`,
@@ -82,26 +46,12 @@ mock.module("@/openrouter", () => ({
 mock.module("@/config", () => ({
   config: {
     openrouterApiKey: "test-key",
-    dbPath: ":memory:",
+    supermemoryApiKey: "test-supermemory-key",
     braindbPath: "/tmp/brainbox-test-braindb-debug-brain-IGNORED.json",
   },
 }));
 
-mock.module("@/openrouter/embedding", () => ({
-  OpenRouterEmbeddingProvider: class {
-    model = "test-embed";
-    dimensions = 4;
-    async embed(_input: string): Promise<number[]> {
-      return [0, 0, 0, 0];
-    }
-    async embedMany(inputs: string[]): Promise<number[][]> {
-      return inputs.map(() => [0, 0, 0, 0]);
-    }
-  },
-}));
-
 const { runDebugBrainInit } = await import("./brain");
-const { Brain: ProdBrain } = await import("@/brain");
 
 beforeEach(() => {
   llmCalls.length = 0;
@@ -109,22 +59,23 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  const { unlink } = await import("fs/promises");
   const tmpFiles = readdirSync(tmpdir()).filter((f) =>
     f.startsWith("brainbox-debug-brain-"),
   );
   for (const f of tmpFiles) {
     try {
-      const { unlink } = await import("fs/promises");
       await unlink(`${tmpdir()}/${f}`);
     } catch {}
   }
 });
 
 describe("runDebugBrainInit", () => {
-  test("B1: returns ok result with full description, baseSystemPrompt, extractedFacts, and uses the supplied seed", async () => {
+  test("B1: returns ok result with full description, baseSystemPrompt, storedFacts, and uses the supplied seed", async () => {
     const result = await runDebugBrainInit({
       displayName: "Maren",
       seed: "Maren, 34, night-shift nurse, hides exhaustion behind sarcasm",
+      noSupermemory: true,
     });
 
     expect(result.ok).toBe(true);
@@ -148,18 +99,22 @@ describe("runDebugBrainInit", () => {
         ),
     );
 
-    expect(result.extractedFacts).toEqual(EXTRACTED_FACTS);
+    expect(result.storedFacts).toHaveLength(1);
+    expect(result.storedFacts[0]!.customId).toBe("persona");
+    expect(result.storedFacts[0]!.content).toContain(PERSONA_DESCRIPTION);
+
     expect(typeof result.elapsedMs).toBe("number");
     expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
-  test("B2: invokes the LLM exactly 3 times — PERSONA_INIT, PERSONA_BASE_SYSTEM_PROMPT, fact-extractor", async () => {
+  test("B2: invokes the LLM exactly 2 times — PERSONA_INIT and PERSONA_BASE_SYSTEM_PROMPT", async () => {
     await runDebugBrainInit({
       displayName: "Test",
       seed: "a seed",
+      noSupermemory: true,
     });
 
-    expect(llmCalls.length).toBe(3);
+    expect(llmCalls.length).toBe(2);
 
     const initCall = llmCalls[0]!;
     expect(initCall.options.message).toBe("a seed");
@@ -168,32 +123,28 @@ describe("runDebugBrainInit", () => {
     const systemCall = llmCalls[1]!;
     expect(systemCall.options.jsonSchemaName).toBeUndefined();
     expect(systemCall.options.message).toBe(PERSONA_DESCRIPTION);
-
-    const factCall = llmCalls[2]!;
-    expect(factCall.options.jsonSchemaName).toBe("fact-extractor");
-    expect(factCall.options.message).toBe(PERSONA_DESCRIPTION);
   });
 
-  test("B3: writes no real on-disk state — no brainbox.db, no brainbox.json, no leftover temp braindb in /tmp", async () => {
+  test("B3: writes no real on-disk state — no leftover temp braindb in /tmp, no stray files in cwd", async () => {
     const cwd = process.cwd();
 
-    const beforeDb = existsSync(`${cwd}/brainbox.db`);
-    const beforeJson = existsSync(`${cwd}/brainbox.json`);
+    const beforeCwdEntries = readdirSync(cwd);
     const beforeTmp = readdirSync(tmpdir()).filter((f) =>
       f.startsWith("brainbox-debug-brain-"),
     );
 
-    await runDebugBrainInit({ displayName: "NoDiskCheck", seed: "x" });
+    await runDebugBrainInit({ displayName: "NoDiskCheck", seed: "x", noSupermemory: true });
 
-    const afterDb = existsSync(`${cwd}/brainbox.db`);
-    const afterJson = existsSync(`${cwd}/brainbox.json`);
+    const afterCwdEntries = readdirSync(cwd);
     const afterTmp = readdirSync(tmpdir()).filter((f) =>
       f.startsWith("brainbox-debug-brain-"),
     );
 
-    expect(afterDb).toBe(beforeDb);
-    expect(afterJson).toBe(beforeJson);
+    expect(afterCwdEntries).toEqual(beforeCwdEntries);
     expect(afterTmp).toHaveLength(0);
+
+    expect(existsSync(`${cwd}/brainbox.db`)).toBe(false);
+    expect(existsSync(`${cwd}/brainbox.json`)).toBe(false);
   });
 
   test("B4: when Brain.create returns null (e.g. LLM throws), result is {ok: false, error}", async () => {
@@ -204,6 +155,7 @@ describe("runDebugBrainInit", () => {
     const result = await runDebugBrainInit({
       displayName: "Doomed",
       seed: "x",
+      noSupermemory: true,
     });
 
     expect(result.ok).toBe(false);
@@ -213,10 +165,11 @@ describe("runDebugBrainInit", () => {
     expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
   });
 
-  test("B5: with no DB_PATH / BRAINDB_PATH env, runDebugBrainInit still works (no env dependency)", async () => {
+  test("B5: with no BRAINDB_PATH env, runDebugBrainInit still works (no env dependency)", async () => {
     const result = await runDebugBrainInit({
       displayName: "EnvFree",
       seed: "no env",
+      noSupermemory: true,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
@@ -225,48 +178,12 @@ describe("runDebugBrainInit", () => {
   });
 });
 
-describe("Brain.create (production path — debug: false)", () => {
-  test("B6: with debug omitted (default), uses db.ingestStatements and does NOT return extractedFacts", async () => {
-    const braindbPath = `${tmpdir()}/brainbox-prod-brain-${randomUUID()}.json`;
-    await writeFile(braindbPath, "{}", { encoding: "utf-8" });
-
-    const result = await ProdBrain.create("ProdMaren", "a prod seed", {
-      dbPath: ":memory:",
-      braindbPath,
-    });
-
-    try {
-      expect(result).not.toBeNull();
-      if (!result) throw new Error("expected result");
-      expect(result.brain).toBeDefined();
-      expect(result.description).toBe(PERSONA_DESCRIPTION);
-      expect(result.baseSystemPrompt).toContain(GENERATED_BASE_SYSTEM_PROMPT);
-      expect(result.extractedFacts).toBeUndefined();
-    } finally {
-      try {
-        await unlink(braindbPath);
-      } catch {}
-    }
-  });
-
-  test("B7: with debug: false (explicit), same as default — uses db.ingestStatements, no extractedFacts", async () => {
-    const braindbPath = `${tmpdir()}/brainbox-prod-brain-${randomUUID()}.json`;
-    await writeFile(braindbPath, "{}", { encoding: "utf-8" });
-
-    const result = await ProdBrain.create("ProdMaren2", "seed", {
-      dbPath: ":memory:",
-      braindbPath,
-      debug: false,
-    });
-
-    try {
-      expect(result).not.toBeNull();
-      if (!result) throw new Error("expected result");
-      expect(result.extractedFacts).toBeUndefined();
-    } finally {
-      try {
-        await unlink(braindbPath);
-      } catch {}
-    }
-  });
-});
+// ---------------------------------------------------------------------------
+// Removed: B6 and B7 (production path with `debug: true|false` option).
+//
+// Reason: `Brain.create` no longer accepts a `debug` option. The production
+// path is now identical to the debug path — `Brain.create` always persists
+// facts to supermemory and returns `{ brain, description, baseSystemPrompt }`
+// (no `extractedFacts`). B1 already exercises the post-refactor production
+// behavior end-to-end through `runDebugBrainInit`.
+// ---------------------------------------------------------------------------

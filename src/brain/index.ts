@@ -1,13 +1,7 @@
 import { randomUUID } from "node:crypto";
+import Supermemory from "supermemory";
 import { config } from "@/config";
-import {
-  IdentityDB,
-  type EmbeddingProvider,
-  type ExtractedFact,
-  type Space,
-} from "identitydb";
 import { llm } from "@/openrouter";
-import { OpenRouterEmbeddingProvider } from "@/openrouter/embedding";
 import { loadPrompt } from "@/openrouter/promptLoader";
 import {
   availabilitySchema,
@@ -15,11 +9,19 @@ import {
   monthlyScheduleSchema,
   type AvailabilityWindows,
   type DailySchedule,
+  type DailySlot,
   type MonthlySchedule,
 } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
-import { factExtractor } from "./factExtractor";
+import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
+import type {
+  ChatAssistantMessage,
+  ChatChoice,
+  ChatFunctionTool,
+  ChatMessages,
+} from "@openrouter/sdk/models";
 import { BrainDBManager, brainManager, type BrainItem } from "./manager";
+import { MemoryStub } from "./stub";
 import {
   translateMessageHistory,
   type MessageHistoryEntry,
@@ -31,13 +33,7 @@ import {
   nextMonth,
   pad2,
 } from "./schedule";
-import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
-import type {
-  ChatAssistantMessage,
-  ChatChoice,
-  ChatFunctionTool,
-  ChatMessages,
-} from "@openrouter/sdk/models";
+import type { FactInput, FactMetadata, SearchHit, Space } from "./types";
 
 export interface DebugOptions {
   personality: string;
@@ -47,169 +43,96 @@ export interface BrainCreateResult {
   brain: Brain;
   description: string;
   baseSystemPrompt: string;
-  /**
-   * Raw facts as returned by `factExtractor.extract(description)`. Populated
-   * only when `Brain.create` is called with `debug: true`; in production
-   * (the default), facts are persisted via `db.ingestStatements` which does
-   * not surface the raw extractor output to the caller.
-   */
-  extractedFacts?: ExtractedFact[];
 }
 
 export class Brain {
   private availabilityCache: Map<string, AvailabilityWindows> = new Map();
-  private embeddingProvider: EmbeddingProvider;
 
   constructor(
-    public db: IdentityDB,
+    public db: Supermemory | MemoryStub,
     public space: Space,
     public brainbase: BrainItem,
     public debug: boolean = false,
-    embeddingProvider?: EmbeddingProvider,
-  ) {
-    this.embeddingProvider =
-      embeddingProvider ?? new OpenRouterEmbeddingProvider();
+  ) {}
+
+  // ---------------------------------------------------------------------------
+  // Memory primitives — thin wrappers over supermemory's `documents` API.
+  //
+  //   containerTag = space.name
+  //   customId     = the stable lookup key (e.g. "daily-schedule:2026-06-10")
+  //   content      = the fact text or JSON-encoded schedule
+  //   metadata     = filterable bag: { kind, source, ... }
+  // ---------------------------------------------------------------------------
+
+  async add(input: FactInput): Promise<{ id: string }> {
+    const response = await this.db.documents.add({
+      content: input.content,
+      containerTag: this.space.name,
+      customId: input.customId,
+      metadata: input.metadata,
+    });
+    return { id: response.id };
   }
+
+  async get(
+    customId: string,
+  ): Promise<{ content: string; metadata: FactMetadata | null } | null> {
+    const listed = await this.db.documents.list({
+      containerTags: [this.space.name],
+      limit: 200,
+    });
+    const match = (listed.memories ?? []).find((m) => m.customId === customId);
+    if (!match) return null;
+    const full = await this.db.documents.get(match.id);
+    return {
+      content: full.content ?? "",
+      metadata: (full.metadata ?? null) as FactMetadata | null,
+    };
+  }
+
+  async list(): Promise<Array<{ customId: string | null; content: string }>> {
+    const listed = await this.db.documents.list({
+      containerTags: [this.space.name],
+      limit: 200,
+    });
+    return (listed.memories ?? []).map((d) => ({
+      customId: d.customId,
+      content: d.content ?? "",
+    }));
+  }
+
+  async search(query: string, limit = 5): Promise<SearchHit[]> {
+    const response = await this.db.search.execute({
+      q: query,
+      containerTag: this.space.name,
+      limit,
+      onlyMatchingChunks: true,
+    });
+    return (response.results ?? []).map((r) => {
+      const firstChunk = r.chunks?.[0];
+      return {
+        content: firstChunk?.content ?? "",
+        score: r.score,
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Domain methods
+  // ---------------------------------------------------------------------------
 
   async createDailySchedule(
     datetime: Date,
     message: string,
   ): Promise<DailySchedule | null> {
-    try {
-      const target = nextDay(datetime);
-      const dateKey = formatDateKey(target);
-      const topicName = `daily-schedule:${dateKey}`;
-
-      const monthlySummary = await this.getMonthlySummaryForDay(target);
-      const history = await this.getHistoryFacts();
-
-      const instruction = await loadPrompt("DAILY_SCHEDULE");
-      const promptMessage = [
-        `Target date: ${dateKey} (${target.toLocaleDateString("en-US", { weekday: "long" })})`,
-        `Personality: ${this.brainbase.baseSystemPrompt}`,
-        monthlySummary
-          ? `Monthly summary for this day: ${monthlySummary}`
-          : "(no monthly summary available for this date)",
-        `Recent history (facts):`,
-        history,
-        `User direction: ${message}`,
-      ].join("\n\n");
-
-      const schedule = await llm.call<DailySchedule>(llm.models.identity, {
-        instruction,
-        message: promptMessage,
-        jsonSchemaName: "daily-schedule",
-        jsonSchema: dailyScheduleSchema,
-      });
-
-      if (!this.debug) {
-        const fact = await this.db.addFact({
-          spaceName: this.space.name,
-          statement: JSON.stringify(schedule),
-          summary: `Daily schedule for ${dateKey} (${schedule.items.length} slots)`,
-          source: "createDailySchedule",
-          confidence: 1.0,
-          topics: [
-            {
-              name: topicName,
-              category: "temporal",
-              granularity: "concrete",
-              role: "schedule",
-            },
-            {
-              name: "daily-schedule",
-              category: "concept",
-              granularity: "abstract",
-              role: "schedule",
-            },
-            {
-              name: dateKey,
-              category: "temporal",
-              granularity: "concrete",
-              role: "date",
-            },
-          ],
-        });
-        await this.indexFactEmbeddingFor(fact);
-      }
-
-      return schedule;
-    } catch (error) {
-      let reason =
-        error instanceof Error
-          ? error.message + `(${error.name})`
-          : String(error);
-      if (error instanceof BadRequestResponseError)
-        reason = reason + `${error.body}`;
-      logger.error(`createDailySchedule failed: ${reason}`);
-      return null;
-    }
+    return await runCreateDailyScheduleSteps(this, datetime, message, noopRunner);
   }
 
   async createMonthlySchedule(
     datetime: Date,
     message: string,
   ): Promise<MonthlySchedule | null> {
-    try {
-      const next = nextMonth(datetime);
-      const monthKey = `${next.year}-${pad2(next.month + 1)}`;
-      const topicName = `monthly-schedule:${monthKey}`;
-
-      const history = await this.getHistoryFacts();
-
-      const instruction = await loadPrompt("MONTHLY_SCHEDULE");
-      const promptMessage = [
-        `Target month: ${monthKey} (${next.daysInMonth} days)`,
-        `Personality: ${this.brainbase.baseSystemPrompt}`,
-        `Recent history (facts):`,
-        history,
-        `User direction: ${message}`,
-      ].join("\n\n");
-
-      const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
-        instruction,
-        message: promptMessage,
-        jsonSchemaName: "monthly-schedule",
-        jsonSchema: monthlyScheduleSchema,
-      });
-
-      if (!this.debug) {
-        const fact = await this.db.addFact({
-          spaceName: this.space.name,
-          statement: JSON.stringify(schedule),
-          summary: `Monthly schedule for ${monthKey} (${schedule.items.length} days)`,
-          source: "createMonthlySchedule",
-          confidence: 1.0,
-          topics: [
-            {
-              name: topicName,
-              category: "temporal",
-              granularity: "concrete",
-              role: "schedule",
-            },
-            {
-              name: "monthly-schedule",
-              category: "concept",
-              granularity: "abstract",
-              role: "schedule",
-            },
-            {
-              name: monthKey,
-              category: "temporal",
-              granularity: "concrete",
-              role: "period",
-            },
-          ],
-        });
-        await this.indexFactEmbeddingFor(fact);
-      }
-
-      return schedule;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.error(`createMonthlySchedule failed: ${reason}`);
-      return null;
-    }
+    return await runCreateMonthlyScheduleSteps(this, datetime, message, noopRunner);
   }
 
   async getTodayScheduledAvailability(
@@ -220,20 +143,10 @@ export class Brain {
       const cached = this.availabilityCache.get(dateKey);
       if (cached) return cached;
 
-      if (this.debug) {
-        logger.warn(
-          "getTodayScheduledAvailability requires a persisted daily schedule; debug brains have no DB. Use deriveAvailabilityFromSchedule(schedule) instead.",
-        );
-        return null;
-      }
+      const stored = await this.get(`daily-schedule:${dateKey}`);
+      if (!stored) return null;
 
-      const topicName = `daily-schedule:${dateKey}`;
-      const facts = await this.db.getTopicFacts(topicName, {
-        spaceName: this.space.name,
-      });
-      if (facts.length === 0) return null;
-
-      const dailySchedule = JSON.parse(facts[0]!.statement) as DailySchedule;
+      const dailySchedule = JSON.parse(stored.content) as DailySchedule;
       const availability =
         await this.deriveAvailabilityFromSchedule(dailySchedule);
 
@@ -244,6 +157,30 @@ export class Brain {
       logger.error(`getTodayScheduledAvailability failed: ${reason}`);
       return null;
     }
+  }
+
+  async getCurrentAndAdjacentSlots(now: Date): Promise<DailySlot[]> {
+    const dateKey = formatDateKey(now);
+    const stored = await this.get(`daily-schedule:${dateKey}`);
+    if (!stored) return [];
+    let schedule: DailySchedule;
+    try {
+      schedule = JSON.parse(stored.content) as DailySchedule;
+    } catch {
+      return [];
+    }
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const toMinutes = (hhmm: string): number => {
+      const [h = 0, m = 0] = hhmm.split(":").map((x) => parseInt(x, 10));
+      return h * 60 + m;
+    };
+    const index = schedule.items.findIndex(
+      (slot) =>
+        toMinutes(slot.start) <= currentMinutes &&
+        currentMinutes < toMinutes(slot.end),
+    );
+    if (index === -1) return [];
+    return schedule.items.slice(Math.max(0, index - 1), index + 2);
   }
 
   async deriveAvailabilityFromSchedule(
@@ -271,45 +208,6 @@ export class Brain {
 
   removeScheduledAvailability(): void {
     this.availabilityCache.clear();
-  }
-
-  /**
-   * Embeds a single fact in the embedding table. Called automatically by
-   * Brain methods that add facts (createDailySchedule, createMonthlySchedule,
-   * Brain.create). Callers who add facts via `db.addFact` directly should
-   * invoke this so the LLM can recall the fact via `searchIdentityDB`. A
-   * no-op in debug mode (where there is no persisted state).
-   */
-  async indexFactEmbeddingFor(fact: { id: string }): Promise<void> {
-    if (this.debug) return;
-    try {
-      await this.db.indexFactEmbedding(fact.id, {
-        spaceName: this.space.name,
-        provider: this.embeddingProvider,
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.warn(`indexFactEmbeddingFor(${fact.id}) failed: ${reason}`);
-    }
-  }
-
-  /**
-   * Backfills embeddings for every fact in this brain's space. Intended
-   * for `Brain.create` and `Brain.load` — runs once at initialization so
-   * facts added by older code paths (or out-of-band) become searchable.
-   * No-op in debug mode and when the space has no facts.
-   */
-  async initializeEmbeddings(): Promise<void> {
-    if (this.debug) return;
-    try {
-      await this.db.indexFactEmbeddings({
-        spaceName: this.space.name,
-        provider: this.embeddingProvider,
-      });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.warn(`initializeEmbeddings failed: ${reason}`);
-    }
   }
 
   async sendMessage(
@@ -394,7 +292,7 @@ export class Brain {
           });
           continue;
         }
-        if (call.function.name === "searchIdentityDB") {
+        if (call.function.name === "searchMemory") {
           const result = await this.executeSearchTool(call.function.arguments);
           messages.push({
             role: "tool",
@@ -415,7 +313,7 @@ export class Brain {
 
       if (
         !hasContent &&
-        toolCalls.every((c) => c.function.name === "searchIdentityDB")
+        toolCalls.every((c) => c.function.name === "searchMemory")
       ) {
         continue;
       }
@@ -433,14 +331,23 @@ export class Brain {
   }
 
   private async buildScheduleBlock(now: Date): Promise<string> {
+    const dateKey = formatDateKey(now);
+    const currentSlots = await this.getCurrentAndAdjacentSlots(now);
+    const currentBlock = currentSlots.length > 0
+      ? `Currently (around ${now.toTimeString().slice(0, 5)}):\n${currentSlots
+          .map(
+            (s) =>
+              `  ${s.start}-${s.end} ${s.activity}${s.notes ? ` (${s.notes})` : ""}`,
+          )
+          .join("\n")}`
+      : `Currently (${dateKey} ${now.toTimeString().slice(0, 5)}): (no matching slot in today's schedule)`;
+
     const days: { label: string; date: Date }[] = [
       {
         label: "Yesterday",
         date: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
       },
-      { label: "Today", date: now },
-      {
-        label: "Tomorrow",
+      { label: "Tomorrow",
         date: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
       },
     ];
@@ -452,19 +359,16 @@ export class Brain {
         `${label} (${key}): ${summary ?? "(no daily schedule on file)"}`,
       );
     }
-    return `Schedule context:\n${blocks.join("\n")}`;
+    return `Schedule context:\n${currentBlock}\n\n${blocks.join("\n")}`;
   }
 
   private async getDailyScheduleSummary(
     dateKey: string,
   ): Promise<string | null> {
-    if (this.debug) return null;
     try {
-      const facts = await this.db.getTopicFacts(`daily-schedule:${dateKey}`, {
-        spaceName: this.space.name,
-      });
-      if (facts.length === 0) return null;
-      const schedule = JSON.parse(facts[0]!.statement) as DailySchedule;
+      const stored = await this.get(`daily-schedule:${dateKey}`);
+      if (!stored) return null;
+      const schedule = JSON.parse(stored.content) as DailySchedule;
       const first = schedule.items[0];
       const last = schedule.items[schedule.items.length - 1];
       if (!first || !last) return null;
@@ -481,15 +385,9 @@ export class Brain {
       return JSON.stringify({ ok: false, error: "missing query" });
     }
     try {
-      const hits = await this.db.searchFacts({
-        spaceName: this.space.name,
-        query,
-        provider: this.embeddingProvider,
-        limit: 5,
-      });
+      const hits = await this.search(query, 5);
       const compact = hits.map((hit) => ({
-        statement: hit.statement,
-        summary: hit.summary,
+        content: hit.content,
         score: hit.score,
       }));
       return JSON.stringify({ ok: true, hits: compact });
@@ -499,17 +397,13 @@ export class Brain {
     }
   }
 
-  private async getMonthlySummaryForDay(target: Date): Promise<string | null> {
-    if (this.debug) return null;
+  async getMonthlySummaryForDay(target: Date): Promise<string | null> {
     try {
       const monthKey = formatMonthKey(target);
-      const topicName = `monthly-schedule:${monthKey}`;
-      const facts = await this.db.getTopicFacts(topicName, {
-        spaceName: this.space.name,
-      });
-      if (facts.length === 0) return null;
+      const stored = await this.get(`monthly-schedule:${monthKey}`);
+      if (!stored) return null;
 
-      const monthly = JSON.parse(facts[0]!.statement) as MonthlySchedule;
+      const monthly = JSON.parse(stored.content) as MonthlySchedule;
       const day = target.getDate();
       const entry = monthly.items.find((d) => d.day === day);
       return entry?.summary ?? null;
@@ -518,21 +412,13 @@ export class Brain {
     }
   }
 
-  private async getHistoryFacts(): Promise<string> {
-    if (this.debug) return "";
+  async getHistoryFacts(): Promise<string> {
     try {
-      const topics = await this.db.listTopics({
-        spaceName: this.space.name,
-        includeFacts: true,
-      });
-      const statements: string[] = [];
-      for (const topic of topics) {
-        const t = topic as { facts?: Array<{ statement: string }> };
-        if (t.facts) {
-          for (const f of t.facts) statements.push(f.statement);
-        }
-      }
-      return statements.slice(-30).join("\n");
+      const docs = await this.list();
+      return docs
+        .map((d) => d.content)
+        .slice(-30)
+        .join("\n");
     } catch {
       return "";
     }
@@ -541,134 +427,299 @@ export class Brain {
   static async create(
     displayName: string,
     seed: string,
-    options: {
-      dbPath?: string;
-      braindbPath?: string;
-      debug?: boolean;
-      embeddingProvider?: EmbeddingProvider;
-    } = {},
+    options: { braindbPath?: string; db?: Supermemory | MemoryStub } = {},
   ): Promise<BrainCreateResult | null> {
-    const dbPath = options.dbPath ?? config.dbPath;
-    const manager = options.braindbPath
-      ? new BrainDBManager(options.braindbPath)
-      : brainManager;
-    const embeddingProvider =
-      options.embeddingProvider ?? new OpenRouterEmbeddingProvider();
-    try {
-      const personaInitInstruction = await loadPrompt("PERSONA_INIT");
-      const description = await llm.call<string>(llm.models.identity, {
-        instruction: personaInitInstruction,
-        message: seed,
-      });
-
-      const personaSystemInstruction = await loadPrompt(
-        "PERSONA_BASE_SYSTEM_PROMPT",
-      );
-      const generatedBaseSystemPrompt = await llm.call<string>(
-        llm.models.identity,
-        {
-          instruction: personaSystemInstruction,
-          message: description,
-        },
-      );
-
-      const personaSystemFixed = await loadPrompt(
-        "PERSONA_BASE_SYSTEM_PROMPT_FIXED",
-      );
-      const baseSystemPrompt = `${generatedBaseSystemPrompt}\n\n${personaSystemFixed}`;
-
-      const db = await IdentityDB.connect({
-        client: "sqlite",
-        filename: dbPath,
-      });
-      await db.initialize();
-      const brainId = randomUUID();
-      const spaceName = `brain:${brainId}`;
-      const space = await db.upsertSpace({
-        name: spaceName,
-        description: displayName,
-      });
-
-      let extractedFacts: ExtractedFact[] | undefined;
-      if (options.debug) {
-        extractedFacts = await factExtractor.extract(description);
-        for (const fact of extractedFacts) {
-          const created = await db.addFact({
-            spaceName,
-            statement: fact.statement ?? description,
-            summary: fact.summary,
-            source: fact.source,
-            confidence: fact.confidence,
-            topics: fact.topics,
-            metadata: fact.metadata,
-          });
-          await db.indexFactEmbedding(created.id, {
-            spaceName,
-            provider: embeddingProvider,
-          });
-        }
-      } else {
-        await db.ingestStatements(description, {
-          extractor: factExtractor,
-          embeddingProvider,
-          spaceName,
-        });
-      }
-
-      const brainbase: BrainItem = {
-        brainId,
-        spaceName,
-        displayName,
-        baseSystemPrompt,
-      };
-      await manager.saveBrain(brainId, brainbase);
-
-      const brain = new Brain(db, space, brainbase, false, embeddingProvider);
-      return { brain, description, baseSystemPrompt, extractedFacts };
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to create brain "${displayName}": ${reason}`);
-      return null;
-    }
+    return await runCreateSteps(displayName, seed, options, noopRunner);
   }
 
   static async load(brainId: string): Promise<Brain | null> {
-    const brain = await brainManager.loadBrain(brainId);
-    if (!brain) return null;
+    const brainbase = await brainManager.loadBrain(brainId);
+    if (!brainbase) return null;
 
-    const db = await IdentityDB.connect({
-      client: "sqlite",
-      filename: config.dbPath,
-    });
-
-    const space = await db.getSpaceByName(brain.spaceName);
-    if (!space) return null;
-
-    const brainInstance = new Brain(db, space, brain);
-    await brainInstance.initializeEmbeddings();
-    return brainInstance;
+    const db = new Supermemory({ apiKey: config.supermemoryApiKey });
+    const space: Space = { name: brainbase.spaceName };
+    return new Brain(db, space, brainbase);
   }
 
-  static async createDebug(options: DebugOptions): Promise<Brain> {
-    const db = await IdentityDB.connect({
-      client: "sqlite",
-      filename: ":memory:",
-    });
-    await db.initialize();
-    const space = await db.upsertSpace({
-      name: "debug",
-      description: "Debug Brain",
-    });
-
+  static async createDebug(
+    options: DebugOptions,
+    db?: Supermemory | MemoryStub,
+  ): Promise<Brain> {
+    const client = db ?? new Supermemory({ apiKey: config.supermemoryApiKey });
+    const space: Space = { name: "brain:debug", description: "Debug Brain" };
     const brainbase: BrainItem = {
       brainId: "debug",
-      spaceName: "debug",
+      spaceName: space.name,
       displayName: "Debug Brain",
       baseSystemPrompt: options.personality,
     };
-
-    return new Brain(db, space, brainbase, true);
+    return new Brain(client, space, brainbase, true);
   }
+}
+
+export type ScheduleStep =
+  | { kind: "gather-context" }
+  | {
+      kind: "generate-schedule";
+      jsonSchemaName: string;
+      schedule: DailySchedule | MonthlySchedule;
+    }
+  | { kind: "persist-schedule"; customId: string; contentLength: number }
+  | { kind: "derive-availability"; availability: AvailabilityWindows };
+
+export type ScheduleProgress = (step: ScheduleStep) => void;
+
+const noScheduleProgress: ScheduleProgress = () => {};
+
+export interface StepRunner {
+  start(label: string): void;
+  done(summary: string): void;
+  fail(reason: string): void;
+}
+
+const noopRunner: StepRunner = {
+  start: () => {},
+  done: () => {},
+  fail: () => {},
+};
+
+export async function runCreateDailyScheduleSteps(
+  brain: Brain,
+  datetime: Date,
+  message: string,
+  runner: StepRunner = noopRunner,
+): Promise<DailySchedule | null> {
+  try {
+    runner.start("gathering context");
+    const target = nextDay(datetime);
+    const dateKey = formatDateKey(target);
+    const twoDaysAgo = new Date(target);
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+    const twoDaysAgoKey = formatDateKey(twoDaysAgo);
+    const [monthlySummary, history, twoDaysAgoStored] = await Promise.all([
+      brain.getMonthlySummaryForDay(target),
+      brain.getHistoryFacts(),
+      brain.get(`daily-schedule:${twoDaysAgoKey}`),
+    ]);
+    let twoDaysAgoSchedule: DailySchedule | null = null;
+    if (twoDaysAgoStored) {
+      try {
+        twoDaysAgoSchedule = JSON.parse(twoDaysAgoStored.content) as DailySchedule;
+      } catch {
+        twoDaysAgoSchedule = null;
+      }
+    }
+    runner.done("");
+
+    runner.start("generating schedule (daily-schedule)");
+    const instruction = await loadPrompt("DAILY_SCHEDULE");
+    const promptMessage = [
+      `Target date: ${dateKey} (${target.toLocaleDateString("en-US", { weekday: "long" })})`,
+      `Personality: ${brain.brainbase.baseSystemPrompt}`,
+      monthlySummary
+        ? `Monthly summary for this day: ${monthlySummary}`
+        : "(no monthly summary available for this date)",
+      `Recent schedule (${twoDaysAgoKey}, 2 days ago): ${
+        twoDaysAgoSchedule
+          ? twoDaysAgoSchedule.items
+              .map((s) => `${s.start} ${s.activity}`)
+              .join(", ")
+          : "(no schedule on file for 2 days ago)"
+      }`,
+      `Recent history (facts):`,
+      history,
+      `User direction: ${message}`,
+    ].join("\n\n");
+
+    const schedule = await llm.call<DailySchedule>(llm.models.identity, {
+      instruction,
+      message: promptMessage,
+      jsonSchemaName: "daily-schedule",
+      jsonSchema: dailyScheduleSchema,
+    });
+    runner.done(`${schedule.items.length} items`);
+
+    runner.start("persisting schedule");
+    await brain.add({
+      customId: `daily-schedule:${dateKey}`,
+      content: JSON.stringify(schedule),
+      metadata: {
+        kind: "schedule",
+        source: "createDailySchedule",
+        date: dateKey,
+      },
+    });
+    runner.done(`customId=daily-schedule:${dateKey}`);
+
+    return schedule;
+  } catch (error) {
+    let reason =
+      error instanceof Error
+        ? error.message + `(${error.name})`
+        : String(error);
+    if (error instanceof BadRequestResponseError)
+      reason = reason + `${error.body}`;
+    logger.error(`createDailySchedule failed: ${reason}`);
+    runner.fail(reason);
+    return null;
+  }
+}
+
+export async function runCreateMonthlyScheduleSteps(
+  brain: Brain,
+  datetime: Date,
+  message: string,
+  runner: StepRunner = noopRunner,
+): Promise<MonthlySchedule | null> {
+  try {
+    runner.start("gathering context");
+    const next = nextMonth(datetime);
+    const monthKey = `${next.year}-${pad2(next.month + 1)}`;
+    const twoMonthsAgo = new Date(next.year, next.month - 2, 1);
+    const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
+    const [history, twoMonthsAgoStored] = await Promise.all([
+      brain.getHistoryFacts(),
+      brain.get(`monthly-schedule:${twoMonthsAgoKey}`),
+    ]);
+    let twoMonthsAgoSchedule: MonthlySchedule | null = null;
+    if (twoMonthsAgoStored) {
+      try {
+        twoMonthsAgoSchedule = JSON.parse(twoMonthsAgoStored.content) as MonthlySchedule;
+      } catch {
+        twoMonthsAgoSchedule = null;
+      }
+    }
+    runner.done("");
+
+    runner.start("generating schedule (monthly-schedule)");
+    const instruction = await loadPrompt("MONTHLY_SCHEDULE");
+    const promptMessage = [
+      `Target month: ${monthKey} (${next.daysInMonth} days)`,
+      `Personality: ${brain.brainbase.baseSystemPrompt}`,
+      `Recent schedule (${twoMonthsAgoKey}, 2 months ago): ${
+        twoMonthsAgoSchedule
+          ? twoMonthsAgoSchedule.items
+              .map((s) => `Day ${s.day}: ${s.summary}`)
+              .join(", ")
+          : "(no schedule on file for 2 months ago)"
+      }`,
+      `Recent history (facts):`,
+      history,
+      `User direction: ${message}`,
+    ].join("\n\n");
+
+    const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
+      instruction,
+      message: promptMessage,
+      jsonSchemaName: "monthly-schedule",
+      jsonSchema: monthlyScheduleSchema,
+    });
+    runner.done(`${schedule.items.length} items`);
+
+    runner.start("persisting schedule");
+    await brain.add({
+      customId: `monthly-schedule:${monthKey}`,
+      content: JSON.stringify(schedule),
+      metadata: {
+        kind: "schedule",
+        source: "createMonthlySchedule",
+        month: monthKey,
+      },
+    });
+    runner.done(`customId=monthly-schedule:${monthKey}`);
+
+    return schedule;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.error(`createMonthlySchedule failed: ${reason}`);
+    runner.fail(reason);
+    return null;
+  }
+}
+
+export async function runCreateSteps(
+  displayName: string,
+  seed: string,
+  options: { braindbPath?: string; db?: Supermemory | MemoryStub } = {},
+  runner: StepRunner = noopRunner,
+): Promise<BrainCreateResult | null> {
+  const manager = options.braindbPath
+    ? new BrainDBManager(options.braindbPath)
+    : brainManager;
+  try {
+    runner.start("generating persona description (PERSONA_INIT)");
+    const personaInitInstruction = await loadPrompt("PERSONA_INIT");
+    const description = await llm.call<string>(llm.models.identity, {
+      instruction: personaInitInstruction,
+      message: seed,
+    });
+    runner.done(snippet80(description));
+
+    runner.start(
+      "generating base system prompt (PERSONA_BASE_SYSTEM_PROMPT + FIXED)",
+    );
+    const personaSystemInstruction = await loadPrompt(
+      "PERSONA_BASE_SYSTEM_PROMPT",
+    );
+    const generatedBaseSystemPrompt = await llm.call<string>(
+      llm.models.identity,
+      {
+        instruction: personaSystemInstruction,
+        message: description,
+      },
+    );
+
+    const personaSystemFixed = await loadPrompt(
+      "PERSONA_BASE_SYSTEM_PROMPT_FIXED",
+    );
+    const baseSystemPrompt = `${generatedBaseSystemPrompt}\n\n${personaSystemFixed}`;
+    runner.done(snippet80(baseSystemPrompt));
+
+    const db =
+      options.db ?? new Supermemory({ apiKey: config.supermemoryApiKey });
+    const brainId = randomUUID();
+    const space: Space = {
+      name: `brain:${brainId}`,
+      description: displayName,
+    };
+
+    const brain = new Brain(db, space, {
+      brainId,
+      spaceName: space.name,
+      displayName,
+      baseSystemPrompt,
+    });
+
+    runner.start("persisting persona document");
+    await brain.add({
+      customId: "persona",
+      content: description,
+      metadata: { kind: "persona", source: "persona-init" },
+    });
+    runner.done(`customId=persona, contentLength=${description.length}`);
+
+    runner.start("saving braindb index");
+    const brainbase: BrainItem = {
+      brainId,
+      spaceName: space.name,
+      displayName,
+      baseSystemPrompt,
+    };
+    await manager.saveBrain(brainId, brainbase);
+    runner.done(`brainId=${brainId}`);
+
+    return { brain, description, baseSystemPrompt };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to create brain "${displayName}": ${reason}`);
+    runner.fail(reason);
+    return null;
+  }
+}
+
+function snippet80(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 80 ? `${flat.slice(0, 77)}...` : flat;
 }
 
 function formatDatetime(now: Date): string {
@@ -699,9 +750,9 @@ function buildSendMessageTools(): ChatFunctionTool[] {
     {
       type: "function",
       function: {
-        name: "searchIdentityDB",
+        name: "searchMemory",
         description:
-          "Semantic search over the long-term memory of facts about the persona and the user. Returns the most relevant stored statements for a natural-language query.",
+          "Semantic search over the long-term memory of facts about the persona and the user. Returns the most relevant stored content for a natural-language query.",
         parameters: {
           type: "object",
           additionalProperties: false,

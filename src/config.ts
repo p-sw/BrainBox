@@ -3,13 +3,16 @@ import { join } from "path";
 
 export interface Config {
   openrouterApiKey: string;
-  dbPath: string;
+  supermemoryApiKey: string;
   braindbPath: string;
 }
 
 const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
 if (!openrouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
-const dbPath = join(process.cwd(), process.env["DB_PATH"] ?? "brainbox.db");
+
+const supermemoryApiKey = process.env["SUPERMEMORY_API_KEY"];
+if (!supermemoryApiKey) throw new Error("SUPERMEMORY_API_KEY is missing");
+
 const braindbPath = join(
   process.cwd(),
   process.env["BRAINDB_PATH"] ?? "brainbox.json",
@@ -17,6 +20,6 @@ const braindbPath = join(
 
 export const config: Config = {
   openrouterApiKey,
-  dbPath,
+  supermemoryApiKey,
   braindbPath,
 };

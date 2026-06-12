@@ -101,6 +101,7 @@ describe("runDebugScheduleDaily", () => {
     const result = await runDebugScheduleDaily({
       message: "focus on writing",
       personality: "test-personality-XYZ",
+      noSupermemory: true,
     });
 
     expect(result.ok).toBe(true);
@@ -131,6 +132,7 @@ describe("runDebugScheduleDaily", () => {
     const result = await runDebugScheduleDaily({
       message: "",
       personality: "p",
+      noSupermemory: true,
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected !ok");
@@ -145,6 +147,7 @@ describe("runDebugScheduleMonthly", () => {
     const result = await runDebugScheduleMonthly({
       message: "study for GRE",
       personality: "test-personality-ABC",
+      noSupermemory: true,
     });
 
     expect(result.ok).toBe(true);
@@ -169,6 +172,7 @@ describe("runDebugScheduleMonthly", () => {
     const result = await runDebugScheduleMonthly({
       message: "",
       personality: "p",
+      noSupermemory: true,
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected !ok");
@@ -186,7 +190,7 @@ describe("debug schedule no-disk invariant", () => {
     const beforeDb = existsSync(resolve(process.cwd(), "brainbox.db"));
     const beforeJson = existsSync(resolve(process.cwd(), "brainbox.json"));
 
-    await runDebugScheduleDaily({ message: "m", personality: "p" });
+    await runDebugScheduleDaily({ message: "m", personality: "p", noSupermemory: true });
 
     const afterDb = existsSync(resolve(process.cwd(), "brainbox.db"));
     const afterJson = existsSync(resolve(process.cwd(), "brainbox.json"));
