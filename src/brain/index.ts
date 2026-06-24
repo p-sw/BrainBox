@@ -206,8 +206,13 @@ export class Brain {
     }
   }
 
-  removeScheduledAvailability(): void {
-    this.availabilityCache.clear();
+  invalidateScheduledAvailability(datetime: Date = new Date()): void {
+    const todayKey = formatDateKey(datetime);
+    for (const key of this.availabilityCache.keys()) {
+      if (key < todayKey) {
+        this.availabilityCache.delete(key);
+      }
+    }
   }
 
   async sendMessage(

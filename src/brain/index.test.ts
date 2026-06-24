@@ -598,8 +598,8 @@ describe("Brain.getTodayScheduledAvailability", () => {
   });
 });
 
-describe("Brain.removeScheduledAvailability", () => {
-  test("S7: cache invalidated after removeScheduledAvailability()", async () => {
+describe("Brain.invalidateScheduledAvailability", () => {
+  test("S7a: today's cached availability is preserved after invalidateScheduledAvailability()", async () => {
     const brain = await makeBrain();
     const today = new Date(2026, 5, 10);
     const todayKey = formatDateKey(today);
@@ -622,11 +622,50 @@ describe("Brain.removeScheduledAvailability", () => {
     expect(r2).not.toBeNull();
     expect(llmCalls.length).toBe(callCountAfterFirst);
 
-    brain.removeScheduledAvailability();
+    brain.invalidateScheduledAvailability(today);
 
     const r3 = await brain.getTodayScheduledAvailability(today);
     expect(r3).not.toBeNull();
-    expect(llmCalls.length).toBe(callCountAfterFirst + 1);
+    expect(llmCalls.length).toBe(callCountAfterFirst);
+  });
+
+  test("S7b: previous days' cached availability is removed, today/future preserved", async () => {
+    const brain = await makeBrain();
+    const today = new Date(2026, 5, 10);
+    const todayKey = formatDateKey(today);
+    const yesterday = new Date(2026, 5, 9);
+    const yesterdayKey = formatDateKey(yesterday);
+    const tomorrow = new Date(2026, 5, 11);
+    const tomorrowKey = formatDateKey(tomorrow);
+    const slots = { items: build48Slots() };
+    for (const key of [yesterdayKey, todayKey, tomorrowKey]) {
+      await brain.add({
+        customId: `daily-schedule:${key}`,
+        content: JSON.stringify(slots),
+        metadata: { kind: "schedule", source: "test", date: key },
+      });
+    }
+
+    await brain.getTodayScheduledAvailability(yesterday);
+    await brain.getTodayScheduledAvailability(today);
+    await brain.getTodayScheduledAvailability(tomorrow);
+
+    const beforeInvalidate = llmCalls.length;
+    await brain.getTodayScheduledAvailability(today);
+    await brain.getTodayScheduledAvailability(tomorrow);
+    expect(llmCalls.length).toBe(beforeInvalidate);
+
+    brain.invalidateScheduledAvailability(today);
+
+    const afterToday = llmCalls.length;
+    await brain.getTodayScheduledAvailability(today);
+    expect(llmCalls.length).toBe(afterToday);
+
+    await brain.getTodayScheduledAvailability(tomorrow);
+    expect(llmCalls.length).toBe(afterToday);
+
+    await brain.getTodayScheduledAvailability(yesterday);
+    expect(llmCalls.length).toBe(afterToday + 1);
   });
 });
 
