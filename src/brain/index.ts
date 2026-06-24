@@ -495,9 +495,21 @@ export async function runCreateDailyScheduleSteps(
   runner: StepRunner = noopRunner,
 ): Promise<DailySchedule | null> {
   try {
-    runner.start("gathering context");
     const target = nextDay(datetime);
     const dateKey = formatDateKey(target);
+    const existing = await brain.get(`daily-schedule:${dateKey}`);
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing.content) as DailySchedule;
+        runner.start("checking for existing schedule");
+        runner.done(`existing schedule found (customId=daily-schedule:${dateKey}), skipping generation`);
+        return parsed;
+      } catch {
+        // fall through to regeneration if stored content is malformed
+      }
+    }
+
+    runner.start("gathering context");
     const twoDaysAgo = new Date(target);
     twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
     const twoDaysAgoKey = formatDateKey(twoDaysAgo);
@@ -577,9 +589,21 @@ export async function runCreateMonthlyScheduleSteps(
   runner: StepRunner = noopRunner,
 ): Promise<MonthlySchedule | null> {
   try {
-    runner.start("gathering context");
     const next = nextMonth(datetime);
     const monthKey = `${next.year}-${pad2(next.month + 1)}`;
+    const existing = await brain.get(`monthly-schedule:${monthKey}`);
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing.content) as MonthlySchedule;
+        runner.start("checking for existing schedule");
+        runner.done(`existing schedule found (customId=monthly-schedule:${monthKey}), skipping generation`);
+        return parsed;
+      } catch {
+        // fall through to regeneration if stored content is malformed
+      }
+    }
+
+    runner.start("gathering context");
     const twoMonthsAgo = new Date(next.year, next.month - 2, 1);
     const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
     const [history, twoMonthsAgoStored] = await Promise.all([

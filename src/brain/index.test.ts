@@ -558,6 +558,118 @@ describe("Brain.createMonthlySchedule", () => {
   });
 });
 
+describe("Brain.createDailySchedule early return", () => {
+  test("returns existing schedule without calling LLM when daily-schedule for tomorrow already exists", async () => {
+    const brain = await makeBrain();
+    const today = new Date(2026, 5, 9);
+    const tomorrow = (await import("./schedule")).nextDay(today);
+    const tomorrowKey = formatDateKey(tomorrow);
+    const preseeded = {
+      items: [
+        {
+          start: "06:00",
+          end: "07:00",
+          activity: "preserved-morning",
+          notes: "n/a",
+        },
+        {
+          start: "22:00",
+          end: "23:00",
+          activity: "preserved-evening",
+          notes: "n/a",
+        },
+      ],
+    };
+    await brain.add({
+      customId: `daily-schedule:${tomorrowKey}`,
+      content: JSON.stringify(preseeded),
+      metadata: { kind: "schedule", source: "test-seed", date: tomorrowKey },
+    });
+
+    llmCalls.length = 0;
+    const result = await brain.createDailySchedule(today, "ignored user message");
+
+    expect(result).toEqual(preseeded);
+    const dailyLlmCall = llmCalls.find(
+      (c) => c.options.jsonSchemaName === "daily-schedule",
+    );
+    expect(dailyLlmCall).toBeUndefined();
+  });
+
+  test("falls through to generation when stored content is malformed", async () => {
+    const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
+    const today = new Date(2026, 5, 9);
+    const tomorrow = (await import("./schedule")).nextDay(today);
+    const tomorrowKey = formatDateKey(tomorrow);
+    await brain.add({
+      customId: `daily-schedule:${tomorrowKey}`,
+      content: "{not valid json",
+      metadata: { kind: "schedule", source: "test-seed", date: tomorrowKey },
+    });
+
+    const result = await brain.createDailySchedule(today, "");
+
+    expect(result).not.toBeNull();
+    expect(result!.items).toHaveLength(48);
+    const dailyLlmCall = llmCalls.find(
+      (c) => c.options.jsonSchemaName === "daily-schedule",
+    );
+    expect(dailyLlmCall).toBeDefined();
+    expect(db.findByCustomId(`daily-schedule:${tomorrowKey}`)).toBeDefined();
+  });
+});
+
+describe("Brain.createMonthlySchedule early return", () => {
+  test("returns existing schedule without calling LLM when monthly-schedule for next month already exists", async () => {
+    const brain = await makeBrain();
+    const today = new Date(2026, 0, 15);
+    const next = nextMonth(today);
+    const monthKey = `${next.year}-${String(next.month + 1).padStart(2, "0")}`;
+    const preseeded = {
+      items: [
+        { day: 1, summary: "preserved-day-1" },
+        { day: 2, summary: "preserved-day-2" },
+        { day: 3, summary: "preserved-day-3" },
+      ],
+    };
+    await brain.add({
+      customId: `monthly-schedule:${monthKey}`,
+      content: JSON.stringify(preseeded),
+      metadata: { kind: "schedule", source: "test-seed", month: monthKey },
+    });
+
+    llmCalls.length = 0;
+    const result = await brain.createMonthlySchedule(today, "ignored user message");
+
+    expect(result).toEqual(preseeded);
+    const monthlyLlmCall = llmCalls.find(
+      (c) => c.options.jsonSchemaName === "monthly-schedule",
+    );
+    expect(monthlyLlmCall).toBeUndefined();
+  });
+
+  test("falls through to generation when stored content is malformed", async () => {
+    const brain = await makeBrain();
+    const today = new Date(2026, 0, 15);
+    const next = nextMonth(today);
+    const monthKey = `${next.year}-${String(next.month + 1).padStart(2, "0")}`;
+    await brain.add({
+      customId: `monthly-schedule:${monthKey}`,
+      content: "{not valid json",
+      metadata: { kind: "schedule", source: "test-seed", month: monthKey },
+    });
+
+    const result = await brain.createMonthlySchedule(today, "");
+
+    expect(result).not.toBeNull();
+    const monthlyLlmCall = llmCalls.find(
+      (c) => c.options.jsonSchemaName === "monthly-schedule",
+    );
+    expect(monthlyLlmCall).toBeDefined();
+  });
+});
+
 describe("Brain.getTodayScheduledAvailability", () => {
   test("S3: returns availability windows when today's daily schedule exists", async () => {
     const brain = await makeBrain();
