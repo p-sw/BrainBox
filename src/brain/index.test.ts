@@ -1072,3 +1072,98 @@ describe("Brain.sendMessage — tool-calling flow", () => {
     expect(hits[0]!.content).toContain("피자");
   });
 });
+
+describe("Brain.sleepMemory", () => {
+  test("SJM1: persists a daily-journal document and returns the LLM text", async () => {
+    const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
+    const datetime = new Date(2026, 5, 10, 23, 0, 0);
+    const dateKey = formatDateKey(datetime);
+    const history = [
+      {
+        sender: "user" as const,
+        time: new Date(2026, 5, 10, 9, 0, 0),
+        content: "오늘 뭐 했어?",
+      },
+      {
+        sender: "persona" as const,
+        time: new Date(2026, 5, 10, 9, 0, 30),
+        content: "그냥 잤어",
+      },
+    ];
+
+    const result = await brain.sleepMemory(datetime, history);
+
+    expect(result).toBe("test-description");
+    const memoirCall = llmCalls.find(
+      (c) =>
+        c.options.jsonSchemaName === undefined &&
+        typeof c.options.message === "string" &&
+        c.options.message.includes("Conversation log:"),
+    );
+    expect(memoirCall).toBeDefined();
+    expect(memoirCall!.options.message).toContain(`Date: ${dateKey}`);
+    expect(memoirCall!.options.message).toContain("Test personality");
+    expect(memoirCall!.options.message).toContain("오늘 뭐 했어?");
+    expect(memoirCall!.options.message).toContain("그냥 잤어");
+    expect(memoirCall!.options.message).toContain("사용자@");
+
+    const stored = db.findByCustomId(`daily-journal:${dateKey}`);
+    expect(stored).toBeDefined();
+    expect(stored!.containerTag).toBe(brain.space.name);
+    expect(stored!.content).toBe("test-description");
+    expect(stored!.metadata).toEqual({
+      kind: "daily-journal",
+      source: "sleepMemory",
+      date: dateKey,
+    });
+  });
+
+  test("SJM2: empty history returns null without calling the LLM", async () => {
+    const brain = await makeBrain();
+    const datetime = new Date(2026, 5, 10, 23, 0, 0);
+
+    llmCalls.length = 0;
+    const result = await brain.sleepMemory(datetime, []);
+
+    expect(result).toBeNull();
+    expect(llmCalls).toHaveLength(0);
+  });
+
+  test("SJM3: stored daily-journal is readable via brain.get with kind=daily-journal", async () => {
+    const brain = await makeBrain();
+    const datetime = new Date(2026, 5, 10, 23, 0, 0);
+    const dateKey = formatDateKey(datetime);
+
+    await brain.sleepMemory(datetime, [
+      {
+        sender: "user" as const,
+        time: new Date(2026, 5, 10, 9, 0, 0),
+        content: "hi",
+      },
+    ]);
+
+    const stored = await brain.get(`daily-journal:${dateKey}`);
+    expect(stored).not.toBeNull();
+    expect(stored!.content).toBe("test-description");
+    expect(stored!.metadata?.kind).toBe("daily-journal");
+  });
+
+  test("SJM4: datetime defaults to today when undefined is passed", async () => {
+    const brain = await makeBrain();
+    const db = brain.db as unknown as MockSupermemory;
+    const expectedKey = formatDateKey(new Date());
+
+    const result = await brain.sleepMemory(undefined as unknown as Date, [
+      {
+        sender: "user" as const,
+        time: new Date(),
+        content: "ping",
+      },
+    ]);
+
+    expect(result).toBe("test-description");
+    const stored = db.findByCustomId(`daily-journal:${expectedKey}`);
+    expect(stored).toBeDefined();
+  });
+});

@@ -135,6 +135,49 @@ export class Brain {
     return await runCreateMonthlyScheduleSteps(this, datetime, message, noopRunner);
   }
 
+  async sleepMemory(
+    datetime: Date = new Date(),
+    history: ReadonlyArray<MessageHistoryEntry>,
+  ): Promise<string | null> {
+    if (history.length === 0) return null;
+
+    try {
+      const dateKey = formatDateKey(datetime);
+      const instruction = await loadPrompt("MEMOIR");
+      const historyBlock = translateMessageHistory(
+        this.brainbase.displayName,
+        history,
+      );
+      const promptMessage = [
+        `Date: ${dateKey}`,
+        `Personality: ${this.brainbase.baseSystemPrompt}`,
+        `Conversation log:`,
+        historyBlock,
+      ].join("\n\n");
+
+      const memoir = await llm.call<string>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+      });
+
+      await this.add({
+        customId: `daily-journal:${dateKey}`,
+        content: memoir,
+        metadata: {
+          kind: "daily-journal",
+          source: "sleepMemory",
+          date: dateKey,
+        },
+      });
+
+      return memoir;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`sleepMemory failed: ${reason}`);
+      return null;
+    }
+  }
+
   async getTodayScheduledAvailability(
     datetime: Date,
   ): Promise<AvailabilityWindows | null> {
