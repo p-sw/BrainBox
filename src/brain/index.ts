@@ -218,10 +218,11 @@ export class Brain {
   async sendMessage(
     history: ReadonlyArray<MessageHistoryEntry>,
     newMessages: ReadonlyArray<MessageHistoryEntry>,
-    options: { now?: Date; maxSteps?: number } = {},
+    options: { now?: Date; maxSteps?: number; initiate?: boolean } = {},
   ): Promise<string[]> {
     const now = options.now ?? new Date();
     const maxSteps = options.maxSteps ?? 8;
+    const initiate = options.initiate ?? false;
 
     const replyMessages: string[] = [];
     const tools: ChatFunctionTool[] = buildSendMessageTools();
@@ -237,16 +238,27 @@ export class Brain {
     const scheduleBlock = await this.buildScheduleBlock(now);
     const datetimeBlock = formatDatetime(now);
 
-    const instruction = await loadPrompt("SEND_MESSAGE");
-    const userPrompt = [
-      `Current date and time: ${datetimeBlock}`,
-      scheduleBlock,
-      memoryBlock,
-      `Conversation so far:`,
-      historyBlock.length > 0 ? historyBlock : "(no prior messages)",
-      `New user message(s) to which you must reply:`,
-      newBlock.length > 0 ? newBlock : "(none — open turn)",
-    ].join("\n\n");
+    const instruction = initiate
+      ? await loadPrompt("START_CONVERSATION")
+      : await loadPrompt("SEND_MESSAGE");
+    const userPrompt = initiate
+      ? [
+          `Current date and time: ${datetimeBlock}`,
+          scheduleBlock,
+          memoryBlock,
+          `Conversation so far:`,
+          historyBlock.length > 0 ? historyBlock : "(no prior messages)",
+          `You are opening this chat. The user has not sent a message.`,
+        ].join("\n\n")
+      : [
+          `Current date and time: ${datetimeBlock}`,
+          scheduleBlock,
+          memoryBlock,
+          `Conversation so far:`,
+          historyBlock.length > 0 ? historyBlock : "(no prior messages)",
+          `New user message(s) to which you must reply:`,
+          newBlock.length > 0 ? newBlock : "(none — open turn)",
+        ].join("\n\n");
 
     const messages: ChatMessages[] = [
       {
