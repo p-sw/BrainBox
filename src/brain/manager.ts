@@ -1,5 +1,6 @@
 import { config } from "@/config";
-import { readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
+import { join } from "path";
 
 export interface BrainItem {
   brainId: string;
@@ -7,50 +8,89 @@ export interface BrainItem {
   displayName: string;
   baseSystemPrompt: string;
 }
-export type BrainDB = Record<string, BrainItem>;
+export type BrainList = BrainItem[];
+
+// Layout:
+//   <root>/brains.json                 — BrainItem[] index, mirror
+//   <root>/<brainId>/brain.json        — BrainItem per brain, source of truth
 
 export class BrainDBManager {
-  constructor(private readonly braindbPath: string = config.braindbPath) {}
+  constructor(private readonly root: string = config.brainboxRoot) {}
 
-  private get db() {
-    return readFile(this.braindbPath, { encoding: "utf-8" }).then(
-      (content) => {
-        return JSON.parse(content) as BrainDB;
-      },
+  private brainDir(brainId: string): string {
+    return join(this.root, brainId);
+  }
+
+  private brainFile(brainId: string): string {
+    return join(this.brainDir(brainId), "brain.json");
+  }
+
+  private indexFile(): string {
+    return join(this.root, "brains.json");
+  }
+
+  private async readIndex(): Promise<BrainList> {
+    try {
+      const content = await readFile(this.indexFile(), { encoding: "utf-8" });
+      return JSON.parse(content) as BrainList;
+    } catch {
+      return [];
+    }
+  }
+
+  private async writeIndex(list: BrainList): Promise<void> {
+    await mkdir(this.root, { recursive: true });
+    await writeFile(
+      this.indexFile(),
+      JSON.stringify(list, null, 2),
+      { encoding: "utf-8" },
     );
   }
 
-  private async writeDb(db: BrainDB) {
-    await writeFile(this.braindbPath, JSON.stringify(db), {
-      encoding: "utf-8",
-    });
+  private async writeBrain(brain: BrainItem): Promise<void> {
+    await mkdir(this.brainDir(brain.brainId), { recursive: true });
+    await writeFile(
+      this.brainFile(brain.brainId),
+      JSON.stringify(brain, null, 2),
+      { encoding: "utf-8" },
+    );
   }
 
   async loadBrain(brainId: string): Promise<BrainItem | undefined> {
-    const brainOrNot = (await this.db)[brainId];
-    return brainOrNot;
+    try {
+      const content = await readFile(this.brainFile(brainId), {
+        encoding: "utf-8",
+      });
+      return JSON.parse(content) as BrainItem;
+    } catch {
+      return undefined;
+    }
   }
 
-  async saveBrain(brainId: string, brain: BrainItem) {
-    const db = await this.db;
-    db[brainId] = brain;
-    await this.writeDb(db);
+  async saveBrain(brainId: string, brain: BrainItem): Promise<void> {
+    await this.writeBrain(brain);
+    const list = await this.readIndex();
+    const idx = list.findIndex((b) => b.brainId === brainId);
+    if (idx >= 0) list[idx] = brain;
+    else list.push(brain);
+    await this.writeIndex(list);
   }
 
-  async listBrain() {
-    return Object.entries(await this.db).map(
-      ([_, { brainId, displayName }]) => ({ brainId, displayName }),
-    );
+  async listBrain(): Promise<Array<{ brainId: string; displayName: string }>> {
+    const list = await this.readIndex();
+    return list.map(({ brainId, displayName }) => ({ brainId, displayName }));
   }
 
-  async deleteBrain(brainId: string) {
-    const db = await this.db;
-    delete db[brainId];
-    await this.writeDb(db);
+  async deleteBrain(brainId: string): Promise<void> {
+    await rm(this.brainDir(brainId), { recursive: true, force: true });
+    const list = await this.readIndex();
+    const filtered = list.filter((b) => b.brainId !== brainId);
+    if (filtered.length === list.length) return;
+    await this.writeIndex(filtered);
   }
 
-  async isBrainAvailable(brainId: string) {
-    return brainId in (await this.db);
+  async isBrainAvailable(brainId: string): Promise<boolean> {
+    return (await this.loadBrain(brainId)) !== undefined;
   }
 }
 
