@@ -10,6 +10,7 @@ const prompts = [
   "SCHEDULE_AVAILABILITY",
   "OBJECTIFIER",
   "SEND_MESSAGE",
+  "START_CONVERSATION",
 ] as const;
 export type PromptKey = (typeof prompts)[number];
 
