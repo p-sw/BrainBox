@@ -20,8 +20,7 @@ import type {
   ChatFunctionTool,
   ChatMessages,
 } from "@openrouter/sdk/models";
-import { BrainDBManager, brainManager, type BrainItem } from "./manager";
-import { MemoryStub } from "./stub";
+import { brainManager, type BrainItem } from "./manager";
 import {
   translateMessageHistory,
   type MessageHistoryEntry,
@@ -35,10 +34,6 @@ import {
 } from "./schedule";
 import type { FactInput, FactMetadata, SearchHit, Space } from "./types";
 
-export interface DebugOptions {
-  personality: string;
-}
-
 export interface BrainCreateResult {
   brain: Brain;
   description: string;
@@ -49,10 +44,9 @@ export class Brain {
   private availabilityCache: Map<string, AvailabilityWindows> = new Map();
 
   constructor(
-    public db: Supermemory | MemoryStub,
+    public db: Supermemory,
     public space: Space,
     public brainbase: BrainItem,
-    public debug: boolean = false,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -125,14 +119,154 @@ export class Brain {
     datetime: Date,
     message: string,
   ): Promise<DailySchedule | null> {
-    return await runCreateDailyScheduleSteps(this, datetime, message, noopRunner);
+    try {
+      const target = nextDay(datetime);
+      const dateKey = formatDateKey(target);
+      const existing = await this.get(`daily-schedule:${dateKey}`);
+      if (existing) {
+        try {
+          return JSON.parse(existing.content) as DailySchedule;
+        } catch {
+          // fall through to regeneration if stored content is malformed
+        }
+      }
+
+      const twoDaysAgo = new Date(target);
+      twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+      const twoDaysAgoKey = formatDateKey(twoDaysAgo);
+      const [monthlySummary, history, twoDaysAgoStored] = await Promise.all([
+        this.getMonthlySummaryForDay(target),
+        this.getHistoryFacts(),
+        this.get(`daily-schedule:${twoDaysAgoKey}`),
+      ]);
+      let twoDaysAgoSchedule: DailySchedule | null = null;
+      if (twoDaysAgoStored) {
+        try {
+          twoDaysAgoSchedule = JSON.parse(twoDaysAgoStored.content) as DailySchedule;
+        } catch {
+          twoDaysAgoSchedule = null;
+        }
+      }
+
+      const instruction = await loadPrompt("DAILY_SCHEDULE");
+      const promptMessage = [
+        `Target date: ${dateKey} (${target.toLocaleDateString("en-US", { weekday: "long" })})`,
+        `Personality: ${this.brainbase.baseSystemPrompt}`,
+        monthlySummary
+          ? `Monthly summary for this day: ${monthlySummary}`
+          : "(no monthly summary available for this date)",
+        `Recent schedule (${twoDaysAgoKey}, 2 days ago): ${
+          twoDaysAgoSchedule
+            ? twoDaysAgoSchedule.items
+                .map((s) => `${s.start} ${s.activity}`)
+                .join(", ")
+            : "(no schedule on file for 2 days ago)"
+        }`,
+        `Recent history (facts):`,
+        history,
+        `User direction: ${message}`,
+      ].join("\n\n");
+
+      const schedule = await llm.call<DailySchedule>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+        jsonSchemaName: "daily-schedule",
+        jsonSchema: dailyScheduleSchema,
+      });
+
+      await this.add({
+        customId: `daily-schedule:${dateKey}`,
+        content: JSON.stringify(schedule),
+        metadata: {
+          kind: "schedule",
+          source: "createDailySchedule",
+          date: dateKey,
+        },
+      });
+
+      return schedule;
+    } catch (error) {
+      let reason =
+        error instanceof Error
+          ? error.message + `(${error.name})`
+          : String(error);
+      if (error instanceof BadRequestResponseError)
+        reason = reason + `${error.body}`;
+      logger.error(`createDailySchedule failed: ${reason}`);
+      return null;
+    }
   }
 
   async createMonthlySchedule(
     datetime: Date,
     message: string,
   ): Promise<MonthlySchedule | null> {
-    return await runCreateMonthlyScheduleSteps(this, datetime, message, noopRunner);
+    try {
+      const next = nextMonth(datetime);
+      const monthKey = `${next.year}-${pad2(next.month + 1)}`;
+      const existing = await this.get(`monthly-schedule:${monthKey}`);
+      if (existing) {
+        try {
+          return JSON.parse(existing.content) as MonthlySchedule;
+        } catch {
+          // fall through to regeneration if stored content is malformed
+        }
+      }
+
+      const twoMonthsAgo = new Date(next.year, next.month - 2, 1);
+      const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
+      const [history, twoMonthsAgoStored] = await Promise.all([
+        this.getHistoryFacts(),
+        this.get(`monthly-schedule:${twoMonthsAgoKey}`),
+      ]);
+      let twoMonthsAgoSchedule: MonthlySchedule | null = null;
+      if (twoMonthsAgoStored) {
+        try {
+          twoMonthsAgoSchedule = JSON.parse(twoMonthsAgoStored.content) as MonthlySchedule;
+        } catch {
+          twoMonthsAgoSchedule = null;
+        }
+      }
+
+      const instruction = await loadPrompt("MONTHLY_SCHEDULE");
+      const promptMessage = [
+        `Target month: ${monthKey} (${next.daysInMonth} days)`,
+        `Personality: ${this.brainbase.baseSystemPrompt}`,
+        `Recent schedule (${twoMonthsAgoKey}, 2 months ago): ${
+          twoMonthsAgoSchedule
+            ? twoMonthsAgoSchedule.items
+                .map((s) => `Day ${s.day}: ${s.summary}`)
+                .join(", ")
+            : "(no schedule on file for 2 months ago)"
+        }`,
+        `Recent history (facts):`,
+        history,
+        `User direction: ${message}`,
+      ].join("\n\n");
+
+      const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
+        instruction,
+        message: promptMessage,
+        jsonSchemaName: "monthly-schedule",
+        jsonSchema: monthlyScheduleSchema,
+      });
+
+      await this.add({
+        customId: `monthly-schedule:${monthKey}`,
+        content: JSON.stringify(schedule),
+        metadata: {
+          kind: "schedule",
+          source: "createMonthlySchedule",
+          month: monthKey,
+        },
+      });
+
+      return schedule;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`createMonthlySchedule failed: ${reason}`);
+      return null;
+    }
   }
 
   async sleepMemory(
@@ -487,9 +621,64 @@ export class Brain {
   static async create(
     displayName: string,
     seed: string,
-    options: { braindbPath?: string; db?: Supermemory | MemoryStub } = {},
   ): Promise<BrainCreateResult | null> {
-    return await runCreateSteps(displayName, seed, options, noopRunner);
+    try {
+      const personaInitInstruction = await loadPrompt("PERSONA_INIT");
+      const description = await llm.call<string>(llm.models.identity, {
+        instruction: personaInitInstruction,
+        message: seed,
+      });
+
+      const personaSystemInstruction = await loadPrompt(
+        "PERSONA_BASE_SYSTEM_PROMPT",
+      );
+      const generatedBaseSystemPrompt = await llm.call<string>(
+        llm.models.identity,
+        {
+          instruction: personaSystemInstruction,
+          message: description,
+        },
+      );
+
+      const personaSystemFixed = await loadPrompt(
+        "PERSONA_BASE_SYSTEM_PROMPT_FIXED",
+      );
+      const baseSystemPrompt = `${generatedBaseSystemPrompt}\n\n${personaSystemFixed}`;
+
+      const db = new Supermemory({ apiKey: config.supermemoryApiKey });
+      const brainId = randomUUID();
+      const space: Space = {
+        name: `brain:${brainId}`,
+        description: displayName,
+      };
+
+      const brain = new Brain(db, space, {
+        brainId,
+        spaceName: space.name,
+        displayName,
+        baseSystemPrompt,
+      });
+
+      await brain.add({
+        customId: "persona",
+        content: description,
+        metadata: { kind: "persona", source: "persona-init" },
+      });
+
+      const brainbase: BrainItem = {
+        brainId,
+        spaceName: space.name,
+        displayName,
+        baseSystemPrompt,
+      };
+      await brainManager.saveBrain(brainId, brainbase);
+
+      return { brain, description, baseSystemPrompt };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to create brain "${displayName}": ${reason}`);
+      return null;
+    }
   }
 
   static async load(brainId: string): Promise<Brain | null> {
@@ -500,310 +689,6 @@ export class Brain {
     const space: Space = { name: brainbase.spaceName };
     return new Brain(db, space, brainbase);
   }
-
-  static async createDebug(
-    options: DebugOptions,
-    db?: Supermemory | MemoryStub,
-  ): Promise<Brain> {
-    const client = db ?? new Supermemory({ apiKey: config.supermemoryApiKey });
-    const space: Space = { name: "brain:debug", description: "Debug Brain" };
-    const brainbase: BrainItem = {
-      brainId: "debug",
-      spaceName: space.name,
-      displayName: "Debug Brain",
-      baseSystemPrompt: options.personality,
-    };
-    return new Brain(client, space, brainbase, true);
-  }
-}
-
-export type ScheduleStep =
-  | { kind: "gather-context" }
-  | {
-      kind: "generate-schedule";
-      jsonSchemaName: string;
-      schedule: DailySchedule | MonthlySchedule;
-    }
-  | { kind: "persist-schedule"; customId: string; contentLength: number }
-  | { kind: "derive-availability"; availability: AvailabilityWindows };
-
-export type ScheduleProgress = (step: ScheduleStep) => void;
-
-const noScheduleProgress: ScheduleProgress = () => {};
-
-export interface StepRunner {
-  start(label: string): void;
-  done(summary: string): void;
-  fail(reason: string): void;
-}
-
-const noopRunner: StepRunner = {
-  start: () => {},
-  done: () => {},
-  fail: () => {},
-};
-
-export async function runCreateDailyScheduleSteps(
-  brain: Brain,
-  datetime: Date,
-  message: string,
-  runner: StepRunner = noopRunner,
-): Promise<DailySchedule | null> {
-  try {
-    const target = nextDay(datetime);
-    const dateKey = formatDateKey(target);
-    const existing = await brain.get(`daily-schedule:${dateKey}`);
-    if (existing) {
-      try {
-        const parsed = JSON.parse(existing.content) as DailySchedule;
-        runner.start("checking for existing schedule");
-        runner.done(`existing schedule found (customId=daily-schedule:${dateKey}), skipping generation`);
-        return parsed;
-      } catch {
-        // fall through to regeneration if stored content is malformed
-      }
-    }
-
-    runner.start("gathering context");
-    const twoDaysAgo = new Date(target);
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-    const twoDaysAgoKey = formatDateKey(twoDaysAgo);
-    const [monthlySummary, history, twoDaysAgoStored] = await Promise.all([
-      brain.getMonthlySummaryForDay(target),
-      brain.getHistoryFacts(),
-      brain.get(`daily-schedule:${twoDaysAgoKey}`),
-    ]);
-    let twoDaysAgoSchedule: DailySchedule | null = null;
-    if (twoDaysAgoStored) {
-      try {
-        twoDaysAgoSchedule = JSON.parse(twoDaysAgoStored.content) as DailySchedule;
-      } catch {
-        twoDaysAgoSchedule = null;
-      }
-    }
-    runner.done("");
-
-    runner.start("generating schedule (daily-schedule)");
-    const instruction = await loadPrompt("DAILY_SCHEDULE");
-    const promptMessage = [
-      `Target date: ${dateKey} (${target.toLocaleDateString("en-US", { weekday: "long" })})`,
-      `Personality: ${brain.brainbase.baseSystemPrompt}`,
-      monthlySummary
-        ? `Monthly summary for this day: ${monthlySummary}`
-        : "(no monthly summary available for this date)",
-      `Recent schedule (${twoDaysAgoKey}, 2 days ago): ${
-        twoDaysAgoSchedule
-          ? twoDaysAgoSchedule.items
-              .map((s) => `${s.start} ${s.activity}`)
-              .join(", ")
-          : "(no schedule on file for 2 days ago)"
-      }`,
-      `Recent history (facts):`,
-      history,
-      `User direction: ${message}`,
-    ].join("\n\n");
-
-    const schedule = await llm.call<DailySchedule>(llm.models.identity, {
-      instruction,
-      message: promptMessage,
-      jsonSchemaName: "daily-schedule",
-      jsonSchema: dailyScheduleSchema,
-    });
-    runner.done(`${schedule.items.length} items`);
-
-    runner.start("persisting schedule");
-    await brain.add({
-      customId: `daily-schedule:${dateKey}`,
-      content: JSON.stringify(schedule),
-      metadata: {
-        kind: "schedule",
-        source: "createDailySchedule",
-        date: dateKey,
-      },
-    });
-    runner.done(`customId=daily-schedule:${dateKey}`);
-
-    return schedule;
-  } catch (error) {
-    let reason =
-      error instanceof Error
-        ? error.message + `(${error.name})`
-        : String(error);
-    if (error instanceof BadRequestResponseError)
-      reason = reason + `${error.body}`;
-    logger.error(`createDailySchedule failed: ${reason}`);
-    runner.fail(reason);
-    return null;
-  }
-}
-
-export async function runCreateMonthlyScheduleSteps(
-  brain: Brain,
-  datetime: Date,
-  message: string,
-  runner: StepRunner = noopRunner,
-): Promise<MonthlySchedule | null> {
-  try {
-    const next = nextMonth(datetime);
-    const monthKey = `${next.year}-${pad2(next.month + 1)}`;
-    const existing = await brain.get(`monthly-schedule:${monthKey}`);
-    if (existing) {
-      try {
-        const parsed = JSON.parse(existing.content) as MonthlySchedule;
-        runner.start("checking for existing schedule");
-        runner.done(`existing schedule found (customId=monthly-schedule:${monthKey}), skipping generation`);
-        return parsed;
-      } catch {
-        // fall through to regeneration if stored content is malformed
-      }
-    }
-
-    runner.start("gathering context");
-    const twoMonthsAgo = new Date(next.year, next.month - 2, 1);
-    const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
-    const [history, twoMonthsAgoStored] = await Promise.all([
-      brain.getHistoryFacts(),
-      brain.get(`monthly-schedule:${twoMonthsAgoKey}`),
-    ]);
-    let twoMonthsAgoSchedule: MonthlySchedule | null = null;
-    if (twoMonthsAgoStored) {
-      try {
-        twoMonthsAgoSchedule = JSON.parse(twoMonthsAgoStored.content) as MonthlySchedule;
-      } catch {
-        twoMonthsAgoSchedule = null;
-      }
-    }
-    runner.done("");
-
-    runner.start("generating schedule (monthly-schedule)");
-    const instruction = await loadPrompt("MONTHLY_SCHEDULE");
-    const promptMessage = [
-      `Target month: ${monthKey} (${next.daysInMonth} days)`,
-      `Personality: ${brain.brainbase.baseSystemPrompt}`,
-      `Recent schedule (${twoMonthsAgoKey}, 2 months ago): ${
-        twoMonthsAgoSchedule
-          ? twoMonthsAgoSchedule.items
-              .map((s) => `Day ${s.day}: ${s.summary}`)
-              .join(", ")
-          : "(no schedule on file for 2 months ago)"
-      }`,
-      `Recent history (facts):`,
-      history,
-      `User direction: ${message}`,
-    ].join("\n\n");
-
-    const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
-      instruction,
-      message: promptMessage,
-      jsonSchemaName: "monthly-schedule",
-      jsonSchema: monthlyScheduleSchema,
-    });
-    runner.done(`${schedule.items.length} items`);
-
-    runner.start("persisting schedule");
-    await brain.add({
-      customId: `monthly-schedule:${monthKey}`,
-      content: JSON.stringify(schedule),
-      metadata: {
-        kind: "schedule",
-        source: "createMonthlySchedule",
-        month: monthKey,
-      },
-    });
-    runner.done(`customId=monthly-schedule:${monthKey}`);
-
-    return schedule;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    logger.error(`createMonthlySchedule failed: ${reason}`);
-    runner.fail(reason);
-    return null;
-  }
-}
-
-export async function runCreateSteps(
-  displayName: string,
-  seed: string,
-  options: { braindbPath?: string; db?: Supermemory | MemoryStub } = {},
-  runner: StepRunner = noopRunner,
-): Promise<BrainCreateResult | null> {
-  const manager = options.braindbPath
-    ? new BrainDBManager(options.braindbPath)
-    : brainManager;
-  try {
-    runner.start("generating persona description (PERSONA_INIT)");
-    const personaInitInstruction = await loadPrompt("PERSONA_INIT");
-    const description = await llm.call<string>(llm.models.identity, {
-      instruction: personaInitInstruction,
-      message: seed,
-    });
-    runner.done(snippet80(description));
-
-    runner.start(
-      "generating base system prompt (PERSONA_BASE_SYSTEM_PROMPT + FIXED)",
-    );
-    const personaSystemInstruction = await loadPrompt(
-      "PERSONA_BASE_SYSTEM_PROMPT",
-    );
-    const generatedBaseSystemPrompt = await llm.call<string>(
-      llm.models.identity,
-      {
-        instruction: personaSystemInstruction,
-        message: description,
-      },
-    );
-
-    const personaSystemFixed = await loadPrompt(
-      "PERSONA_BASE_SYSTEM_PROMPT_FIXED",
-    );
-    const baseSystemPrompt = `${generatedBaseSystemPrompt}\n\n${personaSystemFixed}`;
-    runner.done(snippet80(baseSystemPrompt));
-
-    const db =
-      options.db ?? new Supermemory({ apiKey: config.supermemoryApiKey });
-    const brainId = randomUUID();
-    const space: Space = {
-      name: `brain:${brainId}`,
-      description: displayName,
-    };
-
-    const brain = new Brain(db, space, {
-      brainId,
-      spaceName: space.name,
-      displayName,
-      baseSystemPrompt,
-    });
-
-    runner.start("persisting persona document");
-    await brain.add({
-      customId: "persona",
-      content: description,
-      metadata: { kind: "persona", source: "persona-init" },
-    });
-    runner.done(`customId=persona, contentLength=${description.length}`);
-
-    runner.start("saving braindb index");
-    const brainbase: BrainItem = {
-      brainId,
-      spaceName: space.name,
-      displayName,
-      baseSystemPrompt,
-    };
-    await manager.saveBrain(brainId, brainbase);
-    runner.done(`brainId=${brainId}`);
-
-    return { brain, description, baseSystemPrompt };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to create brain "${displayName}": ${reason}`);
-    runner.fail(reason);
-    return null;
-  }
-}
-
-function snippet80(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > 80 ? `${flat.slice(0, 77)}...` : flat;
 }
 
 function formatDatetime(now: Date): string {
