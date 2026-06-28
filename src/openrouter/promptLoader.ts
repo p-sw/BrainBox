@@ -1,5 +1,6 @@
 import { readFile } from "fs/promises";
-import path from "path";
+import path, { dirname } from "path";
+import { fileURLToPath } from "url";
 
 const prompts = [
   "PERSONA_INIT",
@@ -19,7 +20,9 @@ function fileName(promptKey: PromptKey): string {
   return promptKey.toLowerCase() + ".md";
 }
 
-const PROMPTS_DIR = path.resolve(import.meta.dir, "../../prompts");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROMPTS_DIR = path.resolve(__dirname, "../../prompts");
 
 export async function loadPrompt(promptKey: PromptKey): Promise<string> {
   const filePath = path.join(PROMPTS_DIR, fileName(promptKey));
