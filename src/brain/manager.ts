@@ -1,95 +1,99 @@
 import { config } from "@/config";
-import { mkdir, readFile, rm, writeFile } from "fs/promises";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 
+export type ChannelKeys = "discord" | "telegram";
+export interface BrainDiscordConfig {
+  token: string;
+}
+export interface BrainTelegramConfig {
+  token: string;
+}
 export interface BrainItem {
   brainId: string;
   spaceName: string;
   displayName: string;
   baseSystemPrompt: string;
   activated: boolean;
+  channel?: ChannelKeys;
+  discord?: BrainDiscordConfig;
+  telegram?: BrainTelegramConfig;
 }
+export type BrainItemDiscord = Omit<BrainItem, "channel" | ChannelKeys> & {
+  channel: "discord";
+  discord: BrainDiscordConfig;
+};
+export type BrainItemTelegram = Omit<BrainItem, "channel" | ChannelKeys> & {
+  channel: "telegram";
+  discord: BrainTelegramConfig;
+};
+export type BrainItemWithChannel = BrainItemDiscord | BrainItemTelegram;
 export type BrainList = BrainItem[];
-
-// Layout:
-//   <root>/brains.json                 — BrainItem[] index, mirror
-//   <root>/<brainId>/brain.json        — BrainItem per brain, source of truth
 
 export class BrainDBManager {
   constructor(private readonly root: string = config.brainboxRoot) {}
 
-  private brainDir(brainId: string): string {
-    return join(this.root, brainId);
-  }
-
-  private brainFile(brainId: string): string {
-    return join(this.brainDir(brainId), "brain.json");
-  }
-
-  private indexFile(): string {
+  private dbFile(): string {
     return join(this.root, "brains.json");
   }
 
-  private async readIndex(): Promise<BrainList> {
+  private async readDB(): Promise<BrainList> {
     try {
-      const content = await readFile(this.indexFile(), { encoding: "utf-8" });
+      const content = await readFile(this.dbFile(), { encoding: "utf-8" });
       return JSON.parse(content) as BrainList;
     } catch {
       return [];
     }
   }
 
-  private async writeIndex(list: BrainList): Promise<void> {
+  private async writeDB(list: BrainList): Promise<void> {
     await mkdir(this.root, { recursive: true });
-    await writeFile(this.indexFile(), JSON.stringify(list, null, 2), {
+    await writeFile(this.dbFile(), JSON.stringify(list, null, 2), {
       encoding: "utf-8",
     });
   }
 
-  private async writeBrain(brain: BrainItem): Promise<void> {
-    await mkdir(this.brainDir(brain.brainId), { recursive: true });
-    await writeFile(
-      this.brainFile(brain.brainId),
-      JSON.stringify(brain, null, 2),
-      { encoding: "utf-8" },
-    );
-  }
-
   async loadBrain(brainId: string): Promise<BrainItem | undefined> {
-    try {
-      const content = await readFile(this.brainFile(brainId), {
-        encoding: "utf-8",
-      });
-      return JSON.parse(content) as BrainItem;
-    } catch {
-      return undefined;
-    }
+    const list = await this.readDB();
+    return list.find((b) => b.brainId === brainId);
   }
 
   async saveBrain(brainId: string, brain: BrainItem): Promise<void> {
-    await this.writeBrain(brain);
-    const list = await this.readIndex();
+    const list = await this.readDB();
     const idx = list.findIndex((b) => b.brainId === brainId);
     if (idx >= 0) list[idx] = brain;
     else list.push(brain);
-    await this.writeIndex(list);
+    await this.writeDB(list);
   }
 
-  async listBrain(): Promise<Array<{ brainId: string; displayName: string }>> {
-    const list = await this.readIndex();
-    return list.map(({ brainId, displayName }) => ({ brainId, displayName }));
+  async listAvailableBrain(): Promise<BrainItemWithChannel[]> {
+    return (await this.readDB()).filter((b) =>
+      this.isBrainReady(b),
+    ) as BrainItemWithChannel[];
   }
 
   async deleteBrain(brainId: string): Promise<void> {
-    await rm(this.brainDir(brainId), { recursive: true, force: true });
-    const list = await this.readIndex();
+    const list = await this.readDB();
     const filtered = list.filter((b) => b.brainId !== brainId);
     if (filtered.length === list.length) return;
-    await this.writeIndex(filtered);
+    await this.writeDB(filtered);
   }
 
   async isBrainAvailable(brainId: string): Promise<boolean> {
-    return (await this.loadBrain(brainId)) !== undefined;
+    const item = await this.loadBrain(brainId);
+    return item !== undefined && this.isBrainReady(item);
+  }
+
+  private isBrainReady(item: BrainItem): boolean {
+    if (!item.activated) return false;
+    switch (item.channel) {
+      case "discord":
+        return !!item.discord?.token;
+      case "telegram":
+        return !!item.telegram?.token;
+      default:
+        return false;
+    }
   }
 }
 
