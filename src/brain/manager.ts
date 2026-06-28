@@ -7,6 +7,7 @@ export interface BrainItem {
   spaceName: string;
   displayName: string;
   baseSystemPrompt: string;
+  activated: boolean;
 }
 export type BrainList = BrainItem[];
 
@@ -40,11 +41,9 @@ export class BrainDBManager {
 
   private async writeIndex(list: BrainList): Promise<void> {
     await mkdir(this.root, { recursive: true });
-    await writeFile(
-      this.indexFile(),
-      JSON.stringify(list, null, 2),
-      { encoding: "utf-8" },
-    );
+    await writeFile(this.indexFile(), JSON.stringify(list, null, 2), {
+      encoding: "utf-8",
+    });
   }
 
   private async writeBrain(brain: BrainItem): Promise<void> {

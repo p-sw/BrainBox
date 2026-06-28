@@ -142,7 +142,9 @@ export class Brain {
       let twoDaysAgoSchedule: DailySchedule | null = null;
       if (twoDaysAgoStored) {
         try {
-          twoDaysAgoSchedule = JSON.parse(twoDaysAgoStored.content) as DailySchedule;
+          twoDaysAgoSchedule = JSON.parse(
+            twoDaysAgoStored.content,
+          ) as DailySchedule;
         } catch {
           twoDaysAgoSchedule = null;
         }
@@ -222,7 +224,9 @@ export class Brain {
       let twoMonthsAgoSchedule: MonthlySchedule | null = null;
       if (twoMonthsAgoStored) {
         try {
-          twoMonthsAgoSchedule = JSON.parse(twoMonthsAgoStored.content) as MonthlySchedule;
+          twoMonthsAgoSchedule = JSON.parse(
+            twoMonthsAgoStored.content,
+          ) as MonthlySchedule;
         } catch {
           twoMonthsAgoSchedule = null;
         }
@@ -527,21 +531,23 @@ export class Brain {
   private async buildScheduleBlock(now: Date): Promise<string> {
     const dateKey = formatDateKey(now);
     const currentSlots = await this.getCurrentAndAdjacentSlots(now);
-    const currentBlock = currentSlots.length > 0
-      ? `Currently (around ${now.toTimeString().slice(0, 5)}):\n${currentSlots
-          .map(
-            (s) =>
-              `  ${s.start}-${s.end} ${s.activity}${s.notes ? ` (${s.notes})` : ""}`,
-          )
-          .join("\n")}`
-      : `Currently (${dateKey} ${now.toTimeString().slice(0, 5)}): (no matching slot in today's schedule)`;
+    const currentBlock =
+      currentSlots.length > 0
+        ? `Currently (around ${now.toTimeString().slice(0, 5)}):\n${currentSlots
+            .map(
+              (s) =>
+                `  ${s.start}-${s.end} ${s.activity}${s.notes ? ` (${s.notes})` : ""}`,
+            )
+            .join("\n")}`
+        : `Currently (${dateKey} ${now.toTimeString().slice(0, 5)}): (no matching slot in today's schedule)`;
 
     const days: { label: string; date: Date }[] = [
       {
         label: "Yesterday",
         date: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
       },
-      { label: "Tomorrow",
+      {
+        label: "Tomorrow",
         date: new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
       },
     ];
@@ -652,12 +658,15 @@ export class Brain {
         description: displayName,
       };
 
-      const brain = new Brain(db, space, {
+      const brainbase: BrainItem = {
         brainId,
         spaceName: space.name,
         displayName,
         baseSystemPrompt,
-      });
+        activated: true,
+      };
+
+      const brain = new Brain(db, space, brainbase);
 
       await brain.add({
         customId: "persona",
@@ -665,12 +674,6 @@ export class Brain {
         metadata: { kind: "persona", source: "persona-init" },
       });
 
-      const brainbase: BrainItem = {
-        brainId,
-        spaceName: space.name,
-        displayName,
-        baseSystemPrompt,
-      };
       await brainManager.saveBrain(brainId, brainbase);
 
       return { brain, description, baseSystemPrompt };
