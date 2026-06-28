@@ -1,5 +1,5 @@
 import z from "zod";
-import { parseConfigFile } from "./loader";
+import { parseConfigFile } from "../loader";
 
 const RootConfigSchema = z.object({
   openrouter: z.object({ apiKey: z.string().min(1) }),

@@ -1,5 +1,5 @@
 import { brainboxRoot } from "./loader";
-import rootConfig from "./root";
+import rootConfig from "./loaded/root";
 
 export interface Config {
   openrouterApiKey: string;
