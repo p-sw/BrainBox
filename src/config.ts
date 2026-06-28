@@ -1,5 +1,7 @@
-import "dotenv/config";
-import { join } from "path";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { dirname, join, resolve } from "path";
+import { parse as parseYaml } from "yaml";
 
 export interface Config {
   openrouterApiKey: string;
@@ -7,16 +9,40 @@ export interface Config {
   brainboxRoot: string;
 }
 
-const openrouterApiKey = process.env["OPENROUTER_API_KEY"];
-if (!openrouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+const brainboxRoot = process.env["BRAINBOX_ROOT_PATH"]
+  ? resolve(process.cwd(), process.env["BRAINBOX_ROOT_PATH"])
+  : join(homedir(), ".brainbox");
 
-const supermemoryApiKey = process.env["SUPERMEMORY_API_KEY"];
-if (!supermemoryApiKey) throw new Error("SUPERMEMORY_API_KEY is missing");
+interface BrainboxYaml {
+  openrouter?: { apiKey?: string };
+  supermemory?: { apiKey?: string };
+}
 
-const brainboxRoot = join(
-  process.cwd(),
-  process.env["BRAINBOX_ROOT_PATH"] ?? "brainbox-data",
-);
+const yamlPath = join(brainboxRoot, "brainbox.yaml");
+let parsed: BrainboxYaml = {};
+try {
+  parsed = parseYaml(readFileSync(yamlPath, "utf8")) ?? {};
+} catch (err) {
+  if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+    mkdirSync(dirname(yamlPath), { recursive: true });
+    writeFileSync(
+      yamlPath,
+      "# Fill in your API keys, then run brainbox again.\n" +
+        "openrouter:\n" +
+        "  apiKey: \n" +
+        "supermemory:\n" +
+        "  apiKey: \n",
+    );
+  } else {
+    throw err;
+  }
+}
+
+const openrouterApiKey = parsed.openrouter?.apiKey;
+if (!openrouterApiKey) throw new Error(`openrouter.apiKey is missing in ${yamlPath}`);
+
+const supermemoryApiKey = parsed.supermemory?.apiKey;
+if (!supermemoryApiKey) throw new Error(`supermemory.apiKey is missing in ${yamlPath}`);
 
 export const config: Config = {
   openrouterApiKey,
