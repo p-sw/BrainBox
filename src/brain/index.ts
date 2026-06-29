@@ -45,13 +45,13 @@ export interface BrainCreateResult {
   baseSystemPrompt: string;
 }
 
-export class Brain {
+export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   private availabilityCache: Map<string, AvailabilityWindows> = new Map();
 
   constructor(
     private db: Supermemory,
     private space: Space,
-    public brainbase: BrainItemWithChannel,
+    public brainbase: BB,
     public memory: Memory = new Memory(this.db, this.space),
   ) {}
 
