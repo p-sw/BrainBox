@@ -67,9 +67,7 @@ export class BrainDBManager {
   }
 
   async listAvailableBrain(): Promise<BrainItemWithChannel[]> {
-    return (await this.readDB()).filter((b) =>
-      this.isBrainReady(b),
-    ) as BrainItemWithChannel[];
+    return (await this.readDB()).filter((b) => this.isBrainReady(b));
   }
 
   async deleteBrain(brainId: string): Promise<void> {
@@ -84,7 +82,7 @@ export class BrainDBManager {
     return item !== undefined && this.isBrainReady(item);
   }
 
-  private isBrainReady(item: BrainItem): boolean {
+  isBrainReady(item: BrainItem): item is BrainItemWithChannel {
     if (!item.activated) return false;
     switch (item.channel) {
       case "discord":
