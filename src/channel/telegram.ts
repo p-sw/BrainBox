@@ -1,21 +1,19 @@
 import { Bot } from "gramio";
-import { z } from "zod";
 import type { AvailabilityStatus } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
 import { BaseChannel } from "./base";
+import type { BrainItemTelegram } from "@/brain/manager";
+import { Brain } from "@/brain";
 
-const telegramConfigSchema = z.object({
-  token: z.string().min(1),
-});
-
-export class TelegramChannel extends BaseChannel {
+export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
   private bot?: Bot;
 
+  constructor(brain: Brain<BrainItemTelegram>) {
+    super(brain);
+  }
+
   async init(): Promise<void> {
-    const { token } = telegramConfigSchema.parse({
-      token: this.brain.brainbase.telegram?.token,
-    });
-    this.bot = new Bot(token);
+    this.bot = new Bot(this.brain.brainbase.telegram.token);
     this.bot.onStart(({ info }) => {
       logger.success(`Telegram ready as @${info.username}`);
     });

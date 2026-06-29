@@ -1,25 +1,23 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
-import { z } from "zod";
 import type { AvailabilityStatus } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
 import { BaseChannel } from "./base";
+import type { BrainItemDiscord } from "@/brain/manager";
+import type { Brain } from "@/brain";
 
-const discordConfigSchema = z.object({
-  token: z.string().min(1),
-});
-
-export class DiscordChannel extends BaseChannel {
+export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   private client?: Client;
 
+  constructor(brain: Brain<BrainItemDiscord>) {
+    super(brain);
+  }
+
   async init(): Promise<void> {
-    const { token } = discordConfigSchema.parse({
-      token: this.brain.brainbase.discord?.token,
-    });
     this.client = new Client({ intents: [GatewayIntentBits.Guilds] });
     this.client.once(Events.ClientReady, (c) => {
       logger.success(`Discord ready as ${c.user.tag}`);
     });
-    await this.client.login(token);
+    await this.client.login(this.brain.brainbase.discord.token);
   }
 
   async send(_text: string, _opts?: { replyTo?: string }): Promise<void> {
