@@ -32,7 +32,8 @@ import {
   nextMonth,
   pad2,
 } from "./schedule";
-import type { FactInput, FactMetadata, SearchHit, Space } from "./types";
+import type { Space } from "./types";
+import { Memory } from "./memory";
 
 export interface BrainCreateResult {
   brain: Brain;
@@ -44,72 +45,11 @@ export class Brain {
   private availabilityCache: Map<string, AvailabilityWindows> = new Map();
 
   constructor(
-    public db: Supermemory,
-    public space: Space,
-    public brainbase: BrainItem,
+    private db: Supermemory,
+    private space: Space,
+    public brainbase: BrainItemWithChannel,
+    public memory: Memory = new Memory(this.db, this.space),
   ) {}
-
-  // ---------------------------------------------------------------------------
-  // Memory primitives — thin wrappers over supermemory's `documents` API.
-  //
-  //   containerTag = space.name
-  //   customId     = the stable lookup key (e.g. "daily-schedule:2026-06-10")
-  //   content      = the fact text or JSON-encoded schedule
-  //   metadata     = filterable bag: { kind, source, ... }
-  // ---------------------------------------------------------------------------
-
-  async add(input: FactInput): Promise<{ id: string }> {
-    const response = await this.db.documents.add({
-      content: input.content,
-      containerTag: this.space.name,
-      customId: input.customId,
-      metadata: input.metadata,
-    });
-    return { id: response.id };
-  }
-
-  async get(
-    customId: string,
-  ): Promise<{ content: string; metadata: FactMetadata | null } | null> {
-    const listed = await this.db.documents.list({
-      containerTags: [this.space.name],
-      limit: 200,
-    });
-    const match = (listed.memories ?? []).find((m) => m.customId === customId);
-    if (!match) return null;
-    const full = await this.db.documents.get(match.id);
-    return {
-      content: full.content ?? "",
-      metadata: (full.metadata ?? null) as FactMetadata | null,
-    };
-  }
-
-  async list(): Promise<Array<{ customId: string | null; content: string }>> {
-    const listed = await this.db.documents.list({
-      containerTags: [this.space.name],
-      limit: 200,
-    });
-    return (listed.memories ?? []).map((d) => ({
-      customId: d.customId,
-      content: d.content ?? "",
-    }));
-  }
-
-  async search(query: string, limit = 5): Promise<SearchHit[]> {
-    const response = await this.db.search.execute({
-      q: query,
-      containerTag: this.space.name,
-      limit,
-      onlyMatchingChunks: true,
-    });
-    return (response.results ?? []).map((r) => {
-      const firstChunk = r.chunks?.[0];
-      return {
-        content: firstChunk?.content ?? "",
-        score: r.score,
-      };
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // Domain methods
@@ -122,7 +62,7 @@ export class Brain {
     try {
       const target = nextDay(datetime);
       const dateKey = formatDateKey(target);
-      const existing = await this.get(`daily-schedule:${dateKey}`);
+      const existing = await this.memory.get(`daily-schedule:${dateKey}`);
       if (existing) {
         try {
           return JSON.parse(existing.content) as DailySchedule;
@@ -137,7 +77,7 @@ export class Brain {
       const [monthlySummary, history, twoDaysAgoStored] = await Promise.all([
         this.getMonthlySummaryForDay(target),
         this.getHistoryFacts(),
-        this.get(`daily-schedule:${twoDaysAgoKey}`),
+        this.memory.get(`daily-schedule:${twoDaysAgoKey}`),
       ]);
       let twoDaysAgoSchedule: DailySchedule | null = null;
       if (twoDaysAgoStored) {
@@ -176,7 +116,7 @@ export class Brain {
         jsonSchema: dailyScheduleSchema,
       });
 
-      await this.add({
+      await this.memory.add({
         customId: `daily-schedule:${dateKey}`,
         content: JSON.stringify(schedule),
         metadata: {
@@ -206,7 +146,7 @@ export class Brain {
     try {
       const next = nextMonth(datetime);
       const monthKey = `${next.year}-${pad2(next.month + 1)}`;
-      const existing = await this.get(`monthly-schedule:${monthKey}`);
+      const existing = await this.memory.get(`monthly-schedule:${monthKey}`);
       if (existing) {
         try {
           return JSON.parse(existing.content) as MonthlySchedule;
@@ -219,7 +159,7 @@ export class Brain {
       const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
       const [history, twoMonthsAgoStored] = await Promise.all([
         this.getHistoryFacts(),
-        this.get(`monthly-schedule:${twoMonthsAgoKey}`),
+        this.memory.get(`monthly-schedule:${twoMonthsAgoKey}`),
       ]);
       let twoMonthsAgoSchedule: MonthlySchedule | null = null;
       if (twoMonthsAgoStored) {
@@ -255,7 +195,7 @@ export class Brain {
         jsonSchema: monthlyScheduleSchema,
       });
 
-      await this.add({
+      await this.memory.add({
         customId: `monthly-schedule:${monthKey}`,
         content: JSON.stringify(schedule),
         metadata: {
@@ -298,7 +238,7 @@ export class Brain {
         message: promptMessage,
       });
 
-      await this.add({
+      await this.memory.add({
         customId: `daily-journal:${dateKey}`,
         content: memoir,
         metadata: {
@@ -324,7 +264,7 @@ export class Brain {
       const cached = this.availabilityCache.get(dateKey);
       if (cached) return cached;
 
-      const stored = await this.get(`daily-schedule:${dateKey}`);
+      const stored = await this.memory.get(`daily-schedule:${dateKey}`);
       if (!stored) return null;
 
       const dailySchedule = JSON.parse(stored.content) as DailySchedule;
@@ -342,7 +282,7 @@ export class Brain {
 
   async getCurrentAndAdjacentSlots(now: Date): Promise<DailySlot[]> {
     const dateKey = formatDateKey(now);
-    const stored = await this.get(`daily-schedule:${dateKey}`);
+    const stored = await this.memory.get(`daily-schedule:${dateKey}`);
     if (!stored) return [];
     let schedule: DailySchedule;
     try {
@@ -566,7 +506,7 @@ export class Brain {
     dateKey: string,
   ): Promise<string | null> {
     try {
-      const stored = await this.get(`daily-schedule:${dateKey}`);
+      const stored = await this.memory.get(`daily-schedule:${dateKey}`);
       if (!stored) return null;
       const schedule = JSON.parse(stored.content) as DailySchedule;
       const first = schedule.items[0];
@@ -585,7 +525,7 @@ export class Brain {
       return JSON.stringify({ ok: false, error: "missing query" });
     }
     try {
-      const hits = await this.search(query, 5);
+      const hits = await this.memory.search(query, 5);
       const compact = hits.map((hit) => ({
         content: hit.content,
         score: hit.score,
@@ -600,7 +540,7 @@ export class Brain {
   async getMonthlySummaryForDay(target: Date): Promise<string | null> {
     try {
       const monthKey = formatMonthKey(target);
-      const stored = await this.get(`monthly-schedule:${monthKey}`);
+      const stored = await this.memory.get(`monthly-schedule:${monthKey}`);
       if (!stored) return null;
 
       const monthly = JSON.parse(stored.content) as MonthlySchedule;
@@ -614,7 +554,7 @@ export class Brain {
 
   async getHistoryFacts(): Promise<string> {
     try {
-      const docs = await this.list();
+      const docs = await this.memory.list();
       return docs
         .map((d) => d.content)
         .slice(-30)
@@ -666,9 +606,9 @@ export class Brain {
         activated: true,
       };
 
-      const brain = new Brain(db, space, brainbase);
+      const memory = new Memory(db, space);
 
-      await brain.add({
+      await memory.add({
         customId: "persona",
         content: description,
         metadata: { kind: "persona", source: "persona-init" },
