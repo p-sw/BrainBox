@@ -7,6 +7,7 @@ import {
   availabilitySchema,
   dailyScheduleSchema,
   monthlyScheduleSchema,
+  type Availability,
   type AvailabilityWindows,
   type DailySchedule,
   type DailySlot,
@@ -282,6 +283,24 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
       logger.error(`getTodayScheduledAvailability failed: ${reason}`);
       return null;
     }
+  }
+
+  async getAvailability(
+    datetime: Date = new Date(),
+  ): Promise<Availability> {
+    const h = datetime.getHours();
+    const m = datetime.getMinutes();
+    const hhmm = `${pad2(h)}:${pad2(m)}`;
+    const current = h * 60 + m;
+    const toMinutes = (s: string): number => {
+      const [hh = 0, mm = 0] = s.split(":").map((x) => parseInt(x, 10));
+      return hh * 60 + mm;
+    };
+    const windows = await this.getTodayScheduledAvailability(datetime);
+    const match = windows?.items.find(
+      (w) => toMinutes(w.start) <= current && current < toMinutes(w.end),
+    );
+    return match ?? { start: hhmm, end: hhmm, status: "offline" };
   }
 
   async getCurrentAndAdjacentSlots(now: Date): Promise<DailySlot[]> {
