@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 import { BaseChannel } from "./base";
 import type { BrainItemDiscord } from "@/brain/manager";
 import type { Brain } from "@/brain";
+import type { MessageHistoryEntry } from "@/brain/messageHistory";
 
 export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   private client?: Client;
@@ -18,6 +19,13 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       logger.success(`Discord ready as ${c.user.tag}`);
     });
     await this.client.login(this.brain.brainbase.discord.token);
+  }
+
+  async getMessageHistoryBetween(
+    start: Date,
+    end: Date,
+  ): Promise<ReadonlyArray<MessageHistoryEntry>> {
+    throw new Error("DiscordChannel.getMessageHistoryBetween not implemented.");
   }
 
   async send(_text: string, _opts?: { replyTo?: string }): Promise<void> {
