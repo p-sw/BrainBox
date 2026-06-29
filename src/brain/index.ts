@@ -20,7 +20,11 @@ import type {
   ChatFunctionTool,
   ChatMessages,
 } from "@openrouter/sdk/models";
-import { brainManager, type BrainItem } from "./manager";
+import {
+  brainManager,
+  type BrainItem,
+  type BrainItemWithChannel,
+} from "./manager";
 import {
   translateMessageHistory,
   type MessageHistoryEntry,
@@ -564,10 +568,7 @@ export class Brain {
     }
   }
 
-  static async create(
-    displayName: string,
-    seed: string,
-  ): Promise<BrainCreateResult | null> {
+  static async create(displayName: string, seed: string): Promise<void> {
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
       const description = await llm.call<string>(llm.models.identity, {
@@ -603,7 +604,7 @@ export class Brain {
         spaceName: space.name,
         displayName,
         baseSystemPrompt,
-        activated: true,
+        activated: false,
       };
 
       const memory = new Memory(db, space);
@@ -615,18 +616,15 @@ export class Brain {
       });
 
       await brainManager.saveBrain(brainId, brainbase);
-
-      return { brain, description, baseSystemPrompt };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to create brain "${displayName}": ${reason}`);
-      return null;
     }
   }
 
   static async load(brainId: string): Promise<Brain | null> {
     const brainbase = await brainManager.loadBrain(brainId);
-    if (!brainbase) return null;
+    if (!brainbase || !brainManager.isBrainReady(brainbase)) return null;
 
     const db = new Supermemory({ apiKey: config.supermemoryApiKey });
     const space: Space = { name: brainbase.spaceName };
