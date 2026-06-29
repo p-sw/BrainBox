@@ -362,11 +362,17 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   async sendMessage(
     history: ReadonlyArray<MessageHistoryEntry>,
     newMessages: ReadonlyArray<MessageHistoryEntry>,
-    options: { now?: Date; maxSteps?: number; initiate?: boolean } = {},
+    options: {
+      now?: Date;
+      maxSteps?: number;
+      initiate?: boolean;
+      send?: (text: string) => Promise<void>;
+    } = {},
   ): Promise<string[]> {
     const now = options.now ?? new Date();
     const maxSteps = options.maxSteps ?? 20;
     const initiate = options.initiate ?? false;
+    const send = options.send ?? (async () => {});
 
     const replyMessages: string[] = [];
     const tools: ChatFunctionTool[] = buildSendMessageTools();
@@ -442,7 +448,10 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           const content = parseAddReplyMessageArguments(
             call.function.arguments,
           );
-          if (content !== null) replyMessages.push(content);
+          if (content !== null) {
+            send(content);
+            replyMessages.push(content);
+          }
           messages.push({
             role: "tool",
             toolCallId: call.id,
