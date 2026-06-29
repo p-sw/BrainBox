@@ -25,7 +25,7 @@ export type BrainItemDiscord = Omit<BrainItem, "channel" | ChannelKeys> & {
 };
 export type BrainItemTelegram = Omit<BrainItem, "channel" | ChannelKeys> & {
   channel: "telegram";
-  discord: BrainTelegramConfig;
+  telegram: BrainTelegramConfig;
 };
 export type BrainItemWithChannel = BrainItemDiscord | BrainItemTelegram;
 export type BrainList = BrainItem[];
