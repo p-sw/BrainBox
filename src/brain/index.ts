@@ -5,10 +5,12 @@ import { llm } from "@/openrouter";
 import { loadPrompt } from "@/openrouter/promptLoader";
 import {
   availabilitySchema,
+  baseSystemPromptSchema,
   dailyScheduleSchema,
   monthlyScheduleSchema,
   type Availability,
   type AvailabilityWindows,
+  type BaseSystemPromptGeneration,
   type DailySchedule,
   type DailySlot,
   type MonthlySchedule,
@@ -598,18 +600,20 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
       const personaSystemInstruction = await loadPrompt(
         "PERSONA_BASE_SYSTEM_PROMPT",
       );
-      const generatedBaseSystemPrompt = await llm.call<string>(
+      const generated = await llm.call<BaseSystemPromptGeneration>(
         llm.models.identity,
         {
           instruction: personaSystemInstruction,
           message: description,
+          jsonSchemaName: "base-system-prompt",
+          jsonSchema: baseSystemPromptSchema,
         },
       );
 
       const personaSystemFixed = await loadPrompt(
         "PERSONA_BASE_SYSTEM_PROMPT_FIXED",
       );
-      const baseSystemPrompt = `${generatedBaseSystemPrompt}\n\n${personaSystemFixed}`;
+      const baseSystemPrompt = `${generated.baseSystemPrompt}\n\n${personaSystemFixed}`;
 
       const db = new Supermemory({ apiKey: config.supermemoryApiKey });
       const brainId = randomUUID();
@@ -623,6 +627,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         spaceName: space.name,
         displayName,
         baseSystemPrompt,
+        dndReplyProbability: generated.dndReplyProbability,
         activated: false,
       };
 

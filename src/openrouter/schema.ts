@@ -113,3 +113,18 @@ export type Availability = {
 export type AvailabilityWindows = {
   items: Availability[];
 };
+
+export const baseSystemPromptSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    baseSystemPrompt: { type: "string" },
+    dndReplyProbability: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["baseSystemPrompt", "dndReplyProbability"],
+};
+
+export type BaseSystemPromptGeneration = {
+  baseSystemPrompt: string;
+  dndReplyProbability: number;
+};

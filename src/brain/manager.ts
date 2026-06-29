@@ -14,6 +14,7 @@ export interface BrainItem {
   spaceName: string;
   displayName: string;
   baseSystemPrompt: string;
+  dndReplyProbability: number;
   activated: boolean;
   channel?: ChannelKeys;
   discord?: BrainDiscordConfig;
