@@ -287,9 +287,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     }
   }
 
-  async getAvailability(
-    datetime: Date = new Date(),
-  ): Promise<Availability> {
+  async getAvailability(datetime: Date = new Date()): Promise<Availability> {
     const h = datetime.getHours();
     const m = datetime.getMinutes();
     const hhmm = `${pad2(h)}:${pad2(m)}`;
@@ -367,7 +365,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     options: { now?: Date; maxSteps?: number; initiate?: boolean } = {},
   ): Promise<string[]> {
     const now = options.now ?? new Date();
-    const maxSteps = options.maxSteps ?? 8;
+    const maxSteps = options.maxSteps ?? 20;
     const initiate = options.initiate ?? false;
 
     const replyMessages: string[] = [];
