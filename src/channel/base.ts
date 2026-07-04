@@ -7,6 +7,9 @@ import { Cron, scheduledJobs, type CronCallback } from "croner";
 
 const MESSAGE_DEBOUNCE_MS = 1500;
 const IS_CHATTING_DEBOUNCE_MS = 1000 * 60 * 3; // 3m
+const DEFERRED_QUEUE_CAP = 1000;
+const AVAILABILITY_WATCHER_KEY = "__availability-watcher__";
+const AVAILABILITY_WATCHER_PATTERN = "*/5 * * * *";
 
 export abstract class BaseChannel<
   BB extends BrainItemWithChannel = BrainItemWithChannel,
@@ -17,6 +20,8 @@ export abstract class BaseChannel<
   private isChattingDebounce: NodeJS.Timeout | null = null;
   private isSending: boolean = false; // Is brain generating messages to send?
   private isSendingQueue: MessageHistoryEntry[] = []; // Messages received while isSending = true
+  private deferredQueue: MessageHistoryEntry[] = [];
+  private previousAvailability: AvailabilityStatus | null = null;
 
   constructor(protected readonly brain: Brain<BB>) {}
 
@@ -54,15 +59,33 @@ export abstract class BaseChannel<
     job.stop();
   }
 
+  protected isCronStarted(key: string) {
+    const job = scheduledJobs.find((c) => c.name === key);
+    if (!job) return false;
+    return job.isRunning();
+  }
+
+  protected isCronBusy(key: string) {
+    const job = scheduledJobs.find((c) => c.name === key);
+    if (!job) return false;
+    return job.isBusy();
+  }
+
   async onMessage(message: MessageHistoryEntry) {
+    this.ensureAvailabilityWatcher();
     const availability = await this.brain.getAvailability();
-    if (availability.status === "offline") return;
+    if (availability.status === "offline") {
+      this.deferMessage(message, "offline");
+      return;
+    }
     if (
       !this.isChatting &&
       availability.status === "do-not-disturb" &&
       Math.random() > this.brain.brainbase.dndReplyProbability
-    )
+    ) {
+      this.deferMessage(message, "dnd");
       return;
+    }
 
     if (!this.isSending) {
       this.messageInQueue.push(message);
@@ -114,6 +137,45 @@ export abstract class BaseChannel<
       this.isChatting = false;
       this.isChattingDebounce = null;
     }, IS_CHATTING_DEBOUNCE_MS);
+  }
+
+  private ensureAvailabilityWatcher(): void {
+    if (this.isCronStarted(AVAILABILITY_WATCHER_KEY)) return;
+    this.registerCron(
+      AVAILABILITY_WATCHER_KEY,
+      AVAILABILITY_WATCHER_PATTERN,
+      async () => {
+        const current = await this.brain.getAvailability();
+        const prev = this.previousAvailability;
+        this.previousAvailability = current.status;
+        if (prev !== null && prev !== "online" && current.status === "online") {
+          await this.flushDeferred();
+        }
+      },
+    );
+  }
+
+  private async flushDeferred(): Promise<void> {
+    if (this.deferredQueue.length === 0) return;
+    const current = await this.brain.getAvailability();
+    if (current.status !== "online") return;
+    const drained = this.deferredQueue.splice(0, this.deferredQueue.length);
+    for (const msg of drained) {
+      void this.onMessage(msg);
+    }
+  }
+
+  private deferMessage(message: MessageHistoryEntry, reason: string): void {
+    this.deferredQueue.push(message);
+    if (this.deferredQueue.length > DEFERRED_QUEUE_CAP) {
+      this.deferredQueue.shift();
+      logger.warn(
+        `Deferred queue over cap (${DEFERRED_QUEUE_CAP}); dropped oldest`,
+      );
+    }
+    logger.debug(
+      `Deferred message (reason=${reason}); queue size=${this.deferredQueue.length}`,
+    );
   }
 
   abstract init(): Promise<void>;
