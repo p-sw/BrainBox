@@ -45,7 +45,7 @@ export abstract class BaseChannel<
           await this.brain.sendMessage(
             await this.getMessageHistoryBetween(twoDaysAgo, now),
             newUserMessages,
-            { send: this.send },
+            { send: this.send.bind(this) },
           );
         } catch (e) {
           console.error(`Error while sending message: ${e}`);
