@@ -3,6 +3,7 @@ import type { BrainItemWithChannel } from "@/brain/manager";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 import type { AvailabilityStatus } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
+import { Cron, scheduledJobs, type CronCallback } from "croner";
 
 const MESSAGE_DEBOUNCE_MS = 1500;
 const IS_CHATTING_DEBOUNCE_MS = 1000 * 60 * 3; // 3m
@@ -18,6 +19,40 @@ export abstract class BaseChannel<
   private isSendingQueue: MessageHistoryEntry[] = []; // Messages received while isSending = true
 
   constructor(protected readonly brain: Brain<BB>) {}
+
+  protected registerCron<T = undefined>(
+    key: string,
+    pattern: string,
+    callback: CronCallback<T>,
+  ) {
+    new Cron(
+      pattern,
+      {
+        name: key,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        catch: (e) => logger.error(`Error while running cron ${key}: ${e}`),
+      },
+      callback,
+    );
+  }
+
+  protected pauseCron(key: string) {
+    const job = scheduledJobs.find((c) => c.name === key);
+    if (!job) return false;
+    job.pause();
+  }
+
+  protected resumeCron(key: string) {
+    const job = scheduledJobs.find((c) => c.name === key);
+    if (!job) return false;
+    job.resume();
+  }
+
+  protected removeCron(key: string) {
+    const job = scheduledJobs.find((c) => c.name === key);
+    if (!job) return false;
+    job.stop();
+  }
 
   async onMessage(message: MessageHistoryEntry) {
     const availability = await this.brain.getAvailability();
