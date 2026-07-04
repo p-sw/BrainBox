@@ -2,6 +2,7 @@ import type { Brain } from "@/brain";
 import type { BrainItemWithChannel } from "@/brain/manager";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 import type { AvailabilityStatus } from "@/openrouter/schema";
+import { logger } from "@/utils/logger";
 
 const MESSAGE_DEBOUNCE_MS = 1500;
 const IS_CHATTING_DEBOUNCE_MS = 1000 * 60 * 3; // 3m
@@ -48,7 +49,7 @@ export abstract class BaseChannel<
             { send: this.send.bind(this) },
           );
         } catch (e) {
-          console.error(`Error while sending message: ${e}`);
+          logger.error(`Error while sending message: ${e}`);
         } finally {
           this.isSending = false;
 
