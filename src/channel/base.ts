@@ -41,12 +41,17 @@ export abstract class BaseChannel<
         const twoDaysAgo = new Date(now);
         twoDaysAgo.setDate(now.getDate() - 2);
         this.isSending = true;
-        await this.brain.sendMessage(
-          await this.getMessageHistoryBetween(twoDaysAgo, now),
-          newUserMessages,
-          { send: this.send },
-        );
-        this.isSending = false;
+        try {
+          await this.brain.sendMessage(
+            await this.getMessageHistoryBetween(twoDaysAgo, now),
+            newUserMessages,
+            { send: this.send },
+          );
+        } catch (e) {
+          console.error(`Error while sending message: ${e}`);
+        } finally {
+          this.isSending = false;
+        }
       }, MESSAGE_DEBOUNCE_MS);
     } else {
       this.isSendingQueue.push(message);
