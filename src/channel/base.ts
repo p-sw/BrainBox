@@ -51,6 +51,21 @@ export abstract class BaseChannel<
           console.error(`Error while sending message: ${e}`);
         } finally {
           this.isSending = false;
+
+          if (this.isSendingQueue.length > 0) {
+            const queueMessages = this.isSendingQueue.splice(
+              0,
+              this.isSendingQueue.length,
+            );
+            let lastMessage: MessageHistoryEntry | undefined = undefined;
+            while (!lastMessage && queueMessages.length > 0) {
+              lastMessage = queueMessages.splice(-1, 1)[0];
+            }
+            if (lastMessage) {
+              this.messageInQueue.push(...queueMessages);
+              void this.onMessage(lastMessage);
+            }
+          }
         }
       }, MESSAGE_DEBOUNCE_MS);
     } else {
