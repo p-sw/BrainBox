@@ -359,6 +359,10 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     }
   }
 
+  async persistBrainBase(): Promise<void> {
+    await brainManager.saveBrain(this.brainbase.brainId, this.brainbase);
+  }
+
   async sendMessage(
     history: ReadonlyArray<MessageHistoryEntry>,
     newMessages: ReadonlyArray<MessageHistoryEntry>,

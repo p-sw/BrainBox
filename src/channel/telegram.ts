@@ -7,7 +7,7 @@ import type { Brain } from "@/brain";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 
 const HISTORY_CAP = 1000;
-// ponytail: one brain → one chat. First inbound message sets chat_id; multi-chat brains should add brainbase.telegram.chatId and skip auto-discovery.
+// ponytail: chatId auto-discovers from first inbound; configure brainbase.telegram.chatId to bind the brain to a specific chat and ignore the rest.
 
 export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
   private bot?: Bot;
@@ -20,6 +20,7 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
 
   async init(): Promise<void> {
     this.bot = new Bot(this.brain.brainbase.telegram.token);
+    this.chatId = this.brain.brainbase.telegram.chatId;
     this.bot.onStart(({ info }) => {
       logger.success(`Telegram ready as @${info.username}`);
     });
@@ -27,7 +28,15 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
       if (ctx.from?.isBot()) return;
       const text = ctx.text;
       if (!text) return;
-      if (this.chatId === undefined) this.chatId = ctx.chat.id;
+      const configuredChatId = this.brain.brainbase.telegram.chatId;
+      if (configuredChatId !== undefined && ctx.chat.id !== configuredChatId) {
+        return;
+      }
+      if (configuredChatId === undefined) {
+        this.brain.brainbase.telegram.chatId = ctx.chat.id;
+        void this.brain.persistBrainBase();
+      }
+      this.chatId = ctx.chat.id;
       const entry: MessageHistoryEntry = {
         sender: "user",
         time: new Date(ctx.createdAt * 1000),

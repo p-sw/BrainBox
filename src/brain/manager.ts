@@ -5,9 +5,11 @@ import { join } from "path";
 export type ChannelKeys = "discord" | "telegram";
 export interface BrainDiscordConfig {
   token: string;
+  channelId?: string;
 }
 export interface BrainTelegramConfig {
   token: string;
+  chatId?: number;
 }
 export interface BrainItem {
   brainId: string;

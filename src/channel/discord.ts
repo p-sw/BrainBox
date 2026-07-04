@@ -12,7 +12,6 @@ import type { Brain } from "@/brain";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 
 const HISTORY_CAP = 1000;
-// ponytail: one brain → one channel. First inbound message sets the target; multi-channel brains should add brainbase.discord.channelId and skip auto-discovery.
 const AVAILABILITY_STATUS_MAP: Record<
   AvailabilityStatus,
   "online" | "dnd" | "invisible"
@@ -42,11 +41,26 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
     });
     this.client.once(Events.ClientReady, (c) => {
       logger.success(`Discord ready as ${c.user.tag}`);
+      const channelId = this.brain.brainbase.discord.channelId;
+      if (channelId && !this.targetChannel) {
+        void this.resolveConfiguredChannel(channelId);
+      }
     });
     this.client.on(Events.MessageCreate, (msg) => {
       if (msg.author.bot) return;
       const content = msg.content;
       if (!content) return;
+      const configuredChannelId = this.brain.brainbase.discord.channelId;
+      if (
+        configuredChannelId !== undefined &&
+        msg.channelId !== configuredChannelId
+      ) {
+        return;
+      }
+      if (configuredChannelId === undefined) {
+        this.brain.brainbase.discord.channelId = msg.channelId;
+        void this.brain.persistBrainBase();
+      }
       if (!this.targetChannel && msg.channel.isSendable()) {
         this.targetChannel = msg.channel;
       }
@@ -62,16 +76,19 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   }
 
   async send(text: string, opts?: { replyTo?: string }): Promise<void> {
-    if (!this.targetChannel) {
-      throw new Error("DiscordChannel.send: no channel yet (no inbound message)");
+    const channel = await this.resolveSendChannel();
+    if (!channel) {
+      throw new Error(
+        "DiscordChannel.send: no channel yet (no inbound message)",
+      );
     }
     if (opts?.replyTo) {
-      await this.targetChannel.send({
+      await channel.send({
         content: text,
         reply: { messageReference: opts.replyTo },
       });
     } else {
-      await this.targetChannel.send(text);
+      await channel.send(text);
     }
   }
 
@@ -90,5 +107,25 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   private pushHistory(entry: MessageHistoryEntry): void {
     this.history.push(entry);
     if (this.history.length > HISTORY_CAP) this.history.shift();
+  }
+
+  private async resolveSendChannel(): Promise<SendableChannels | undefined> {
+    if (this.targetChannel) return this.targetChannel;
+    if (!this.client?.isReady()) return undefined;
+    const channelId = this.brain.brainbase.discord.channelId;
+    if (!channelId) return undefined;
+    const channel = await this.client.channels.fetch(channelId);
+    if (channel && channel.isSendable()) {
+      this.targetChannel = channel;
+    }
+    return this.targetChannel;
+  }
+
+  private async resolveConfiguredChannel(channelId: string): Promise<void> {
+    if (!this.client) return;
+    const channel = await this.client.channels.fetch(channelId);
+    if (channel && channel.isSendable()) {
+      this.targetChannel = channel;
+    }
   }
 }
