@@ -39,6 +39,9 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         GatewayIntentBits.MessageContent, // ponytail: privileged intent — required for msg.content; disable if unavailable, text will be empty
       ],
     });
+    if (this.brain.brainbase.discord.channelId) {
+      this.isReady = true;
+    }
     this.client.once(Events.ClientReady, (c) => {
       logger.success(`Discord ready as ${c.user.tag}`);
       const channelId = this.brain.brainbase.discord.channelId;
@@ -60,6 +63,7 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       if (configuredChannelId === undefined) {
         this.brain.brainbase.discord.channelId = msg.channelId;
         void this.brain.persistBrainBase();
+        this.isReady = true;
       }
       if (!this.targetChannel && msg.channel.isSendable()) {
         this.targetChannel = msg.channel;

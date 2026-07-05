@@ -25,6 +25,7 @@ export abstract class BaseChannel<
   private isSendingQueue: MessageHistoryEntry[] = []; // Messages received while isSending = true
   private deferredQueue: MessageHistoryEntry[] = [];
   private previousAvailability: AvailabilityStatus | null = null;
+  protected isReady: boolean = false;
 
   constructor(protected readonly brain: Brain<BB>) {
     this.registerCron(

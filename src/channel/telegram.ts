@@ -21,6 +21,9 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
   async init(): Promise<void> {
     this.bot = new Bot(this.brain.brainbase.telegram.token);
     this.chatId = this.brain.brainbase.telegram.chatId;
+    if (this.chatId !== undefined) {
+      this.isReady = true;
+    }
     this.bot.onStart(({ info }) => {
       logger.success(`Telegram ready as @${info.username}`);
     });
@@ -35,6 +38,7 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
       if (configuredChatId === undefined) {
         this.brain.brainbase.telegram.chatId = ctx.chat.id;
         void this.brain.persistBrainBase();
+        this.isReady = true;
       }
       this.chatId = ctx.chat.id;
       const entry: MessageHistoryEntry = {
