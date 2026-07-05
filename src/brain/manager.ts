@@ -17,6 +17,8 @@ export interface BrainItem {
   displayName: string;
   baseSystemPrompt: string;
   dndReplyProbability: number;
+  startConversationCountThreshold: number;
+  startConversationTimeThreshold: number;
   activated: boolean;
   channel?: ChannelKeys;
   discord?: BrainDiscordConfig;

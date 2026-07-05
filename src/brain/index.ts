@@ -639,6 +639,10 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         displayName,
         baseSystemPrompt,
         dndReplyProbability: generated.dndReplyProbability,
+        startConversationCountThreshold:
+          generated.startConversationCountThreshold,
+        startConversationTimeThreshold:
+          generated.startConversationTimeThreshold,
         activated: false,
       };
 
