@@ -73,16 +73,21 @@ export abstract class BaseChannel<
 
   private async regenerateSchedules(): Promise<void> {
     const today = new Date();
-    const yesterday = new Date(
+    const tomorrow = new Date(
       today.getFullYear(),
       today.getMonth(),
-      today.getDate() - 1,
+      today.getDate() + 1,
     );
-    await this.brain.createDailySchedule(yesterday);
+    await this.brain.createDailySchedule(tomorrow);
     await this.brain.createDailySchedule(today);
 
     // merging monthly schedule with daily schedule, so it can keep check on missed monthly schedule generation
-    await this.brain.createMonthlySchedule(new Date());
+    const nextMonth = new Date(
+      today.getFullYear(),
+      today.getMonth() + 1,
+      today.getDate(),
+    );
+    await this.brain.createMonthlySchedule(nextMonth);
   }
 
   private async runStartConversation(): Promise<void> {

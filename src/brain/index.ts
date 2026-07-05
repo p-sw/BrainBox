@@ -32,13 +32,7 @@ import {
   translateMessageHistory,
   type MessageHistoryEntry,
 } from "./messageHistory";
-import {
-  formatDateKey,
-  formatMonthKey,
-  nextDay,
-  nextMonth,
-  pad2,
-} from "./schedule";
+import { formatDateKey, formatMonthKey, pad2 } from "./schedule";
 import type { Space } from "./types";
 import { Memory } from "./memory";
 
@@ -64,8 +58,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
 
   async createDailySchedule(datetime: Date): Promise<DailySchedule | null> {
     try {
-      const target = nextDay(datetime);
-      const dateKey = formatDateKey(target);
+      const dateKey = formatDateKey(datetime);
       const existing = await this.memory.get(`daily-schedule:${dateKey}`);
       if (existing) {
         try {
@@ -75,11 +68,11 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         }
       }
 
-      const twoDaysAgo = new Date(target);
+      const twoDaysAgo = new Date(datetime);
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
       const twoDaysAgoKey = formatDateKey(twoDaysAgo);
       const [monthlySummary, history, twoDaysAgoStored] = await Promise.all([
-        this.getMonthlySummaryForDay(target),
+        this.getMonthlySummaryForDay(datetime),
         this.getHistoryFacts(),
         this.memory.get(`daily-schedule:${twoDaysAgoKey}`),
       ]);
@@ -96,7 +89,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
 
       const instruction = await loadPrompt("DAILY_SCHEDULE");
       const promptMessage = [
-        `Target date: ${dateKey} (${target.toLocaleDateString("en-US", { weekday: "long" })})`,
+        `Target date: ${dateKey} (${datetime.toLocaleDateString("en-US", { weekday: "long" })})`,
         `Personality: ${this.brainbase.baseSystemPrompt}`,
         monthlySummary
           ? `Monthly summary for this day: ${monthlySummary}`
@@ -144,8 +137,13 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
 
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
     try {
-      const next = nextMonth(datetime);
-      const monthKey = `${next.year}-${pad2(next.month + 1)}`;
+      const year =
+        datetime.getMonth() === 11
+          ? datetime.getFullYear() + 1
+          : datetime.getFullYear();
+      const month = (datetime.getMonth() + 1) % 12;
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const monthKey = `${year}-${pad2(month + 1)}`;
       const existing = await this.memory.get(`monthly-schedule:${monthKey}`);
       if (existing) {
         try {
@@ -155,7 +153,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         }
       }
 
-      const twoMonthsAgo = new Date(next.year, next.month - 2, 1);
+      const twoMonthsAgo = new Date(year, month - 2, 1);
       const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
       const [history, twoMonthsAgoStored] = await Promise.all([
         this.getHistoryFacts(),
@@ -174,7 +172,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
 
       const instruction = await loadPrompt("MONTHLY_SCHEDULE");
       const promptMessage = [
-        `Target month: ${monthKey} (${next.daysInMonth} days)`,
+        `Target month: ${monthKey} (${daysInMonth} days)`,
         `Personality: ${this.brainbase.baseSystemPrompt}`,
         `Recent schedule (${twoMonthsAgoKey}, 2 months ago): ${
           twoMonthsAgoSchedule
