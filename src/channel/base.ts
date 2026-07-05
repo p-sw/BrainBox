@@ -13,6 +13,8 @@ const AVAILABILITY_WATCHER_KEY = "__availability-watcher__";
 const AVAILABILITY_WATCHER_PATTERN = "*/5 * * * *";
 const SLEEP_MEMORY_CRON_KEY = "__sleep-memory__";
 const SLEEP_MEMORY_CRON_PATTERN = "0 * * * *"; // every 1 hour
+const START_CONVERSATION_CRON_KEY = "__start-conversation__";
+const START_CONVERSATION_CRON_PATTERN = "*/10 * * * *"; // every 10 min
 
 export abstract class BaseChannel<
   BB extends BrainItemWithChannel = BrainItemWithChannel,
@@ -25,7 +27,9 @@ export abstract class BaseChannel<
   private isSendingQueue: MessageHistoryEntry[] = []; // Messages received while isSending = true
   private deferredQueue: MessageHistoryEntry[] = [];
   private previousAvailability: AvailabilityStatus | null = null;
+  private startConversationCounters: Map<string, number> = new Map();
   protected isReady: boolean = false;
+  private startConversationTimeout: boolean = false;
 
   constructor(protected readonly brain: Brain<BB>) {
     this.registerCron(
@@ -35,7 +39,9 @@ export abstract class BaseChannel<
         const dateKey = formatDateKey(new Date());
         const availability = await this.brain.getAvailability();
         if (availability.status !== "offline") return;
-        const existing = await this.brain.memory.get(`daily-journal:${dateKey}`);
+        const existing = await this.brain.memory.get(
+          `daily-journal:${dateKey}`,
+        );
         if (existing) return;
         const history = await this.getMessageHistoryBetween(
           new Date(Date.now() - 24 * 60 * 60 * 1000),
@@ -44,6 +50,54 @@ export abstract class BaseChannel<
         await this.brain.sleepMemory(new Date(), history);
       },
     );
+    this.registerCron(
+      START_CONVERSATION_CRON_KEY,
+      START_CONVERSATION_CRON_PATTERN,
+      () => this.runStartConversation(),
+    );
+  }
+
+  private async runStartConversation(): Promise<void> {
+    if (!this.isReady) {
+      logger.debug("startConversation: skip — not ready");
+      return;
+    }
+    if (this.isChatting || this.startConversationTimeout) {
+      logger.debug("startConversation: skip — chat in progress");
+      return;
+    }
+    const availability = await this.brain.getAvailability();
+    if (availability.status !== "online") {
+      return;
+    }
+    const now = new Date();
+    const dateKey = formatDateKey(now);
+    const count = this.startConversationCounters.get(dateKey) ?? 0;
+    const countThreshold = this.brain.brainbase.startConversationCountThreshold;
+    if (count >= countThreshold) return;
+    const nowMs = now.getTime();
+    const history = await this.getMessageHistoryBetween(
+      new Date(nowMs - 24 * 60 * 60 * 1000),
+      now,
+    );
+    try {
+      const replies = await this.brain.sendMessage(history, [], {
+        initiate: true,
+        send: this.send.bind(this),
+      });
+      if (replies.length === 0) return;
+      this.startConversationCounters.set(dateKey, count + 1);
+      this.startConversationTimeout = true;
+      setTimeout(
+        () => {
+          this.startConversationTimeout = false;
+        },
+        this.brain.brainbase.startConversationTimeThreshold * 60 * 1000,
+      );
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      logger.error(`startConversation sendMessage failed: ${reason}`);
+    }
   }
 
   protected registerCron<T = undefined>(
