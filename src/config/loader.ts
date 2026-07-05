@@ -3,6 +3,7 @@ import { z, ZodError } from "zod";
 import { homedir } from "os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { logger } from "@/utils/logger";
 
 export const brainboxRoot = process.env["BRAINBOX_ROOT_PATH"]
   ? resolve(process.cwd(), process.env["BRAINBOX_ROOT_PATH"])
@@ -33,13 +34,15 @@ export function parseConfigFile<T>(
     return schema.parse(raw);
   } catch (err) {
     if (err instanceof ZodError) {
-      throw new Error(
+      logger.error(
         `Invalid config in ${path}:\n` +
           err.issues
             .map((i) => `  ${i.path.join(".") || "(root)"}: ${i.message}`)
             .join("\n"),
       );
+      process.exit(1);
+    } else {
+      throw err;
     }
-    throw err;
   }
 }
