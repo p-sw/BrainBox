@@ -61,6 +61,10 @@ export class BrainDBManager {
     return list.find((b) => b.brainId === brainId);
   }
 
+  async listBrains(): Promise<BrainList> {
+    return this.readDB();
+  }
+
   async saveBrain(brainId: string, brain: BrainItem): Promise<void> {
     const list = await this.readDB();
     const idx = list.findIndex((b) => b.brainId === brainId);
