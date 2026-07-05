@@ -3,6 +3,7 @@ import type { BrainItemWithChannel } from "@/brain/manager";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 import type { AvailabilityStatus } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
+import { formatDateKey } from "@/brain/schedule";
 import { Cron, scheduledJobs, type CronCallback } from "croner";
 
 const MESSAGE_DEBOUNCE_MS = 1500;
@@ -10,6 +11,8 @@ const IS_CHATTING_DEBOUNCE_MS = 1000 * 60 * 3; // 3m
 const DEFERRED_QUEUE_CAP = 1000;
 const AVAILABILITY_WATCHER_KEY = "__availability-watcher__";
 const AVAILABILITY_WATCHER_PATTERN = "*/5 * * * *";
+const SLEEP_MEMORY_CRON_KEY = "__sleep-memory__";
+const SLEEP_MEMORY_CRON_PATTERN = "0 * * * *"; // every 1 hour
 
 export abstract class BaseChannel<
   BB extends BrainItemWithChannel = BrainItemWithChannel,
@@ -23,7 +26,24 @@ export abstract class BaseChannel<
   private deferredQueue: MessageHistoryEntry[] = [];
   private previousAvailability: AvailabilityStatus | null = null;
 
-  constructor(protected readonly brain: Brain<BB>) {}
+  constructor(protected readonly brain: Brain<BB>) {
+    this.registerCron(
+      SLEEP_MEMORY_CRON_KEY,
+      SLEEP_MEMORY_CRON_PATTERN,
+      async () => {
+        const dateKey = formatDateKey(new Date());
+        const availability = await this.brain.getAvailability();
+        if (availability.status !== "offline") return;
+        const existing = await this.brain.memory.get(`daily-journal:${dateKey}`);
+        if (existing) return;
+        const history = await this.getMessageHistoryBetween(
+          new Date(Date.now() - 24 * 60 * 60 * 1000),
+          new Date(),
+        );
+        await this.brain.sleepMemory(new Date(), history);
+      },
+    );
+  }
 
   protected registerCron<T = undefined>(
     key: string,
