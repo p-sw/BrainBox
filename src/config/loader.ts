@@ -9,18 +9,17 @@ export const brainboxRoot = process.env["BRAINBOX_ROOT_PATH"]
   ? resolve(process.cwd(), process.env["BRAINBOX_ROOT_PATH"])
   : join(homedir(), ".brainbox");
 
-// ponytail: add a file → define a zod schema + one parseConfigFile() call.
-// ponytail: add a key → extend the schema, extend the template.body, add to Config + the mapping below.
-// ponytail: keep template.body and the schema in sync by hand; replace with z.toJSONSchema → defaults when more than ~5 files.
+// ponytail: add a file → define a zod schema with .default() values + one parseConfigFile() call.
+// ponytail: add a key → add the field + its default to the schema. That's it.
 export function parseConfigFile<T>(
   file: string,
-  template: { header?: string; body: Record<string, unknown> },
-  schema: z.ZodType<T>,
+  options: { header?: string; schema: z.ZodType<T> },
 ): T {
   const path = join(brainboxRoot, file);
+  const defaults = defaultsFromSchema(options.schema);
   const templateStr =
-    (template.header ? template.header + "\n" : "") +
-    stringifyYaml(template.body);
+    (options.header ? options.header + "\n" : "") +
+    (defaults === undefined ? "" : stringifyYaml(defaults));
   let raw: unknown;
   try {
     raw = parseYaml(readFileSync(path, "utf8")) ?? {};
@@ -28,10 +27,10 @@ export function parseConfigFile<T>(
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, templateStr);
-    raw = template.body;
+    raw = defaults ?? {};
   }
   try {
-    return schema.parse(raw);
+    return options.schema.parse(raw);
   } catch (err) {
     if (err instanceof ZodError) {
       logger.error(
@@ -45,4 +44,30 @@ export function parseConfigFile<T>(
       throw err;
     }
   }
+}
+
+function defaultsFromSchema(schema: z.ZodType): unknown {
+  const json = z.toJSONSchema(schema) as Record<string, unknown>;
+  return extractDefaults(json);
+}
+
+function extractDefaults(node: unknown): unknown {
+  if (!node || typeof node !== "object") return undefined;
+  const obj = node as Record<string, unknown>;
+  if ("default" in obj) return obj.default;
+  if (
+    obj.type === "object" &&
+    obj.properties &&
+    typeof obj.properties === "object"
+  ) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(
+      obj.properties as Record<string, unknown>,
+    )) {
+      const d = extractDefaults(v);
+      if (d !== undefined) out[k] = d;
+    }
+    return Object.keys(out).length ? out : undefined;
+  }
+  return undefined;
 }
