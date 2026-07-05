@@ -17,6 +17,8 @@ const START_CONVERSATION_CRON_KEY = "__start-conversation__";
 const START_CONVERSATION_CRON_PATTERN = "*/10 * * * *"; // every 10 min
 const DAILY_SCHEDULE_CRON_KEY = "__daily-schedule__";
 const DAILY_SCHEDULE_CRON_PATTERN = "0 0 * * *"; // every day at 00:00
+const DAILY_SCHEDULE_NOON_CRON_KEY = "__daily-schedule-noon__";
+const DAILY_SCHEDULE_NOON_CRON_PATTERN = "0 12 * * *"; // every day at 12:00 (backup tick)
 
 export abstract class BaseChannel<
   BB extends BrainItemWithChannel = BrainItemWithChannel,
@@ -55,25 +57,32 @@ export abstract class BaseChannel<
     this.registerCron(
       DAILY_SCHEDULE_CRON_KEY,
       DAILY_SCHEDULE_CRON_PATTERN,
-      async () => {
-        const today = new Date();
-        const tomorrow = new Date(
-          today.getFullYear(),
-          today.getMonth(),
-          today.getDate() + 1,
-        );
-        await this.brain.createDailySchedule(tomorrow);
-        await this.brain.createDailySchedule(today);
-
-        // merging monthly schedule with daily schedule, so it can keep check on missed monthly schedule generation
-        await this.brain.createMonthlySchedule(new Date());
-      },
+      () => this.regenerateSchedules(),
+    );
+    this.registerCron(
+      DAILY_SCHEDULE_NOON_CRON_KEY,
+      DAILY_SCHEDULE_NOON_CRON_PATTERN,
+      () => this.regenerateSchedules(),
     );
     this.registerCron(
       START_CONVERSATION_CRON_KEY,
       START_CONVERSATION_CRON_PATTERN,
       () => this.runStartConversation(),
     );
+  }
+
+  private async regenerateSchedules(): Promise<void> {
+    const today = new Date();
+    const yesterday = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() - 1,
+    );
+    await this.brain.createDailySchedule(yesterday);
+    await this.brain.createDailySchedule(today);
+
+    // merging monthly schedule with daily schedule, so it can keep check on missed monthly schedule generation
+    await this.brain.createMonthlySchedule(new Date());
   }
 
   private async runStartConversation(): Promise<void> {
