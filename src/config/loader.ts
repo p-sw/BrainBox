@@ -27,7 +27,7 @@ export function parseConfigFile<T>(
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, templateStr);
-    raw = {};
+    raw = template.body;
   }
   try {
     return schema.parse(raw);
