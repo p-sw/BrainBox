@@ -15,6 +15,10 @@ const SLEEP_MEMORY_CRON_KEY = "__sleep-memory__";
 const SLEEP_MEMORY_CRON_PATTERN = "0 * * * *"; // every 1 hour
 const START_CONVERSATION_CRON_KEY = "__start-conversation__";
 const START_CONVERSATION_CRON_PATTERN = "*/10 * * * *"; // every 10 min
+const DAILY_SCHEDULE_CRON_KEY = "__daily-schedule__";
+const DAILY_SCHEDULE_CRON_PATTERN = "0 0 * * *"; // every day at 00:00
+const MONTHLY_SCHEDULE_CRON_KEY = "__monthly-schedule__";
+const MONTHLY_SCHEDULE_CRON_PATTERN = "0 0 28 * *"; // 28th of every month at 00:00
 
 export abstract class BaseChannel<
   BB extends BrainItemWithChannel = BrainItemWithChannel,
@@ -48,6 +52,27 @@ export abstract class BaseChannel<
           new Date(),
         );
         await this.brain.sleepMemory(new Date(), history);
+      },
+    );
+    this.registerCron(
+      DAILY_SCHEDULE_CRON_KEY,
+      DAILY_SCHEDULE_CRON_PATTERN,
+      async () => {
+        const today = new Date();
+        const tomorrow = new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate() + 1,
+        );
+        await this.brain.createDailySchedule(tomorrow);
+        await this.brain.createDailySchedule(today);
+      },
+    );
+    this.registerCron(
+      MONTHLY_SCHEDULE_CRON_KEY,
+      MONTHLY_SCHEDULE_CRON_PATTERN,
+      async () => {
+        await this.brain.createMonthlySchedule(new Date());
       },
     );
     this.registerCron(

@@ -62,10 +62,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   // Domain methods
   // ---------------------------------------------------------------------------
 
-  async createDailySchedule(
-    datetime: Date,
-    message: string,
-  ): Promise<DailySchedule | null> {
+  async createDailySchedule(datetime: Date): Promise<DailySchedule | null> {
     try {
       const target = nextDay(datetime);
       const dateKey = formatDateKey(target);
@@ -113,7 +110,6 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         }`,
         `Recent history (facts):`,
         history,
-        `User direction: ${message}`,
       ].join("\n\n");
 
       const schedule = await llm.call<DailySchedule>(llm.models.identity, {
@@ -146,10 +142,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     }
   }
 
-  async createMonthlySchedule(
-    datetime: Date,
-    message: string,
-  ): Promise<MonthlySchedule | null> {
+  async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
     try {
       const next = nextMonth(datetime);
       const monthKey = `${next.year}-${pad2(next.month + 1)}`;
@@ -192,7 +185,6 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         }`,
         `Recent history (facts):`,
         history,
-        `User direction: ${message}`,
       ].join("\n\n");
 
       const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
