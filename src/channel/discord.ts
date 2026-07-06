@@ -6,7 +6,7 @@ import {
 } from "discord.js";
 import type { AvailabilityStatus } from "@/openrouter/schema";
 import { logger } from "@/utils/logger";
-import { BaseChannel } from "./base";
+import { BaseChannel, type PairingEntry, type PairingInbound } from "./base";
 import type { BrainItemDiscord } from "@/brain/manager";
 import type { Brain } from "@/brain";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
@@ -41,7 +41,10 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
     });
     if (this.brain.brainbase.discord.channelId) {
       this.isReady = true;
+    } else {
+      this.engagePairing();
     }
+    this.registerActive();
     this.client.once(Events.ClientReady, (c) => {
       logger.success(`Discord ready as ${c.user.tag}`);
       const channelId = this.brain.brainbase.discord.channelId;
@@ -53,20 +56,19 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       if (msg.author.bot) return;
       const content = msg.content;
       if (!content) return;
-      const configuredChannelId = this.brain.brainbase.discord.channelId;
-      if (
-        configuredChannelId !== undefined &&
-        msg.channelId !== configuredChannelId
-      ) {
+      const channelId = this.brain.brainbase.discord.channelId;
+      if (channelId !== undefined && msg.channelId !== channelId) {
         return;
       }
-      if (configuredChannelId === undefined) {
-        this.brain.brainbase.discord.channelId = msg.channelId;
-        void this.brain.persistBrainBase();
-        this.isReady = true;
-      }
-      if (!this.targetChannel && msg.channel.isSendable()) {
-        this.targetChannel = msg.channel;
+      const inbound: PairingInbound = {
+        content,
+        time: msg.createdAt,
+        replyTo: msg.id,
+        channelId: msg.channelId,
+      };
+      if (channelId === undefined) {
+        void this.onPairing(inbound);
+        return;
       }
       const entry: MessageHistoryEntry = {
         sender: "user",
@@ -77,6 +79,39 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       void this.onMessage(entry);
     });
     await this.client.login(this.brain.brainbase.discord.token);
+  }
+
+  protected async sendPairingReply(
+    text: string,
+    inbound: PairingInbound,
+  ): Promise<void> {
+    if (!this.client || inbound.channelId === undefined) return;
+    const channel = await this.client.channels.fetch(inbound.channelId);
+    if (!channel || !channel.isSendable()) return;
+    await channel.send({
+      content: text,
+      ...(inbound.replyTo
+        ? { reply: { messageReference: inbound.replyTo } }
+        : {}),
+    });
+  }
+
+  protected override async completePairing(entry: PairingEntry): Promise<void> {
+    if (entry.channelId !== undefined) {
+      this.brain.brainbase.discord.channelId = entry.channelId;
+      await this.brain.persistBrainBase();
+      this.targetChannel = undefined;
+      if (this.client) {
+        const channel = await this.client.channels.fetch(entry.channelId);
+        if (channel && channel.isSendable()) {
+          this.targetChannel = channel;
+        }
+      }
+      logger.success(
+        `Discord channel bound: ${this.brain.brainbase.displayName} → ${entry.channelId}`,
+      );
+    }
+    await super.completePairing(entry);
   }
 
   async send(text: string, opts?: { replyTo?: string }): Promise<void> {

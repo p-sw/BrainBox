@@ -20,6 +20,27 @@ const DAILY_SCHEDULE_CRON_PATTERN = "0 0 * * *"; // every day at 00:00
 const DAILY_SCHEDULE_NOON_CRON_KEY = "__daily-schedule-noon__";
 const DAILY_SCHEDULE_NOON_CRON_PATTERN = "0 12 * * *"; // every day at 12:00 (backup tick)
 
+export interface PairingInbound {
+  content: string;
+  time: Date;
+  replyTo?: string;
+  channelId?: string;
+  chatId?: number;
+}
+
+export interface PairingEntry {
+  brainId: string;
+  channelId?: string;
+  chatId?: number;
+}
+
+export interface PairingCompletionResult {
+  ok: boolean;
+  error?: string;
+  brainId?: string;
+  displayName?: string;
+}
+
 export abstract class BaseChannel<
   BB extends BrainItemWithChannel = BrainItemWithChannel,
 > {
@@ -33,7 +54,11 @@ export abstract class BaseChannel<
   private previousAvailability: AvailabilityStatus | null = null;
   private startConversationCounters: Map<string, number> = new Map();
   protected isReady: boolean = false;
+  protected pairingMode: boolean = false;
   private startConversationTimeout: boolean = false;
+
+  private static pairingRegistry = new Map<string, PairingEntry>();
+  private static activeChannels = new Map<string, BaseChannel>();
 
   constructor(protected readonly brain: Brain<BB>) {
     this.registerCron(
@@ -284,6 +309,110 @@ export abstract class BaseChannel<
     logger.debug(
       `Deferred message (reason=${reason}); queue size=${this.deferredQueue.length}`,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pairing
+  //
+  // When a brain has a channel token but no channel/chat id, the channel sits
+  // in `pairingMode` until the user confirms via the CLI. Every inbound
+  // message during pairing triggers `onPairing`, which replies with a fresh
+  // code; the CLI consumes that code, persists the inbound's channel/chat id
+  // onto the brain, and flips `isReady = true`.
+  // ---------------------------------------------------------------------------
+
+  static generatePairingCode(): string {
+    const hex = "0123456789ABCDEF";
+    let out = "";
+    for (let i = 0; i < 8; i++) {
+      if (i === 4) out += "-";
+      out += hex[Math.floor(Math.random() * 16)];
+    }
+    return out;
+  }
+
+  protected registerActive(): void {
+    BaseChannel.activeChannels.set(this.brain.brainbase.brainId, this);
+  }
+
+  protected engagePairing(): void {
+    this.pairingMode = true;
+    this.isReady = false;
+  }
+
+  protected abstract sendPairingReply(
+    text: string,
+    inbound: PairingInbound,
+  ): Promise<void>;
+
+  /**
+   * Handle an inbound message while in pairing mode: register a fresh code,
+   * then reply with start message + code + help. `onPairing` is wired as the
+   * message event listener from each channel subclass.
+   */
+  protected async onPairing(inbound: PairingInbound): Promise<void> {
+    const code = BaseChannel.generatePairingCode();
+    BaseChannel.pairingRegistry.set(code, {
+      brainId: this.brain.brainbase.brainId,
+      channelId: inbound.channelId,
+      chatId: inbound.chatId,
+    });
+    const displayName = this.brain.brainbase.displayName;
+    const text = [
+      `🔗 Pairing started for "${displayName}".`,
+      ``,
+      `Your pairing code: ${code}`,
+      ``,
+      `To finish pairing, run this on the host running the daemon:`,
+      `  brainbox pairing ${code}`,
+      ``,
+      `The code is single-use. Send another message here if you need a new one.`,
+    ].join("\n");
+    logger.info(
+      `Pairing code issued for "${displayName}": ${code} (channel=${
+        inbound.channelId ?? `chat:${inbound.chatId}`
+      })`,
+    );
+    await this.sendPairingReply(text, inbound);
+  }
+
+  /**
+   * Finalize pairing by persisting the bound channel/chat id onto the
+   * subclass's config. Subclasses override to write the id and refresh
+   * their send target before calling super.
+   */
+  protected async completePairing(entry: PairingEntry): Promise<void> {
+    this.pairingMode = false;
+    this.isReady = true;
+  }
+
+  static async completePairingByCode(
+    code: string,
+  ): Promise<PairingCompletionResult> {
+    const normalized = code.trim().toUpperCase();
+    const entry = BaseChannel.pairingRegistry.get(normalized);
+    if (!entry) {
+      return { ok: false, error: "invalid or expired pairing code" };
+    }
+    const channel = BaseChannel.activeChannels.get(entry.brainId);
+    if (!channel) {
+      return {
+        ok: false,
+        error: "no active channel for that brain (is the daemon running?)",
+      };
+    }
+    try {
+      await channel.completePairing(entry);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: `failed to persist pairing: ${reason}` };
+    }
+    BaseChannel.pairingRegistry.delete(normalized);
+    return {
+      ok: true,
+      brainId: entry.brainId,
+      displayName: channel.brain.brainbase.displayName,
+    };
   }
 
   abstract init(): Promise<void>;

@@ -8,12 +8,13 @@ import {
 import { Brain } from "@/brain";
 import { DiscordChannel } from "@/channel/discord";
 import { TelegramChannel } from "@/channel/telegram";
-import { config } from "@/config";
 import { logger } from "@/utils/logger";
+import { DAEMON_SOCKET_PATH } from "@/utils/daemonClient";
 import { createServer, type Socket } from "node:net";
 import { chmodSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { dispatch } from "./daemon/commands";
+
+import "./daemon/pairingCommand";
 
 export async function daemon(): Promise<void> {
   const items = await brainManager.listAvailableBrain();
@@ -50,7 +51,7 @@ export async function daemon(): Promise<void> {
   await listenOnSocket();
 }
 
-const SOCKET_PATH = join(config.brainboxRoot, "daemon.sock");
+const SOCKET_PATH = DAEMON_SOCKET_PATH;
 
 async function listenOnSocket(): Promise<void> {
   try {
@@ -133,6 +134,7 @@ async function handleLine(conn: Socket, line: string): Promise<void> {
 export function register(program: Command): Command {
   return registerCommand(program, {
     name: "daemon",
-    description: "Run the BrainBox daemon (activated channels + remote commands)",
+    description:
+      "Run the BrainBox daemon (activated channels + remote commands)",
   }).action(daemon);
 }

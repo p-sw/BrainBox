@@ -6,6 +6,7 @@ import { dirname, join } from "path";
 import { logger } from "@/utils/logger";
 import { register as daemon } from "@/commands/daemon";
 import { register as brain } from "@/commands/brain";
+import { register as pairing } from "@/commands/pairing";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,6 +35,7 @@ program
 
 daemon(program);
 brain(program);
+pairing(program);
 
 program.on("command:*", () => {
   logger.error(`Unknown command: ${program.args.join(" ")}`);
