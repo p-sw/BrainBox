@@ -4,7 +4,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { logger } from "@/utils/logger";
-import { register as run } from "@/commands/run";
+import { register as daemon } from "@/commands/daemon";
 import { register as brain } from "@/commands/brain";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,7 +32,7 @@ program
     outputError: (str) => logger.error(str.replace("error: ", "")),
   });
 
-run(program);
+daemon(program);
 brain(program);
 
 program.on("command:*", () => {
@@ -40,4 +40,4 @@ program.on("command:*", () => {
   program.help();
 });
 
-program.parse(argv);
+program.parseAsync(argv);
