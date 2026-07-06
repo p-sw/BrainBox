@@ -42,6 +42,10 @@ export class Memory {
     };
   }
 
+  async clear(): Promise<void> {
+    await this.db.documents.deleteBulk({ containerTags: [this.space.name] });
+  }
+
   async list(): Promise<Array<{ customId: string | null; content: string }>> {
     const listed = await this.db.documents.list({
       containerTags: [this.space.name],

@@ -590,7 +590,10 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     }
   }
 
-  static async create(displayName: string, seed: string): Promise<void> {
+  static async create(
+    displayName: string,
+    seed: string,
+  ): Promise<{ brainId: string } | null> {
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
       const description = await llm.call<string>(llm.models.identity, {
@@ -645,10 +648,31 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
       });
 
       await brainManager.saveBrain(brainId, brainbase);
+      return { brainId };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to create brain "${displayName}": ${reason}`);
+      return null;
     }
+  }
+
+  static async delete(brainId: string): Promise<boolean> {
+    const brainbase = await brainManager.loadBrain(brainId);
+    if (!brainbase) return false;
+
+    const db = new Supermemory({ apiKey: config.supermemoryApiKey });
+    const memory = new Memory(db, { name: brainbase.spaceName });
+    try {
+      await memory.clear();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `Failed to clear memory for brain "${brainbase.displayName}": ${reason}`,
+      );
+    }
+
+    await brainManager.deleteBrain(brainId);
+    return true;
   }
 
   static async load(brainId: string): Promise<Brain | null> {
