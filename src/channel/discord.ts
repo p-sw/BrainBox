@@ -167,4 +167,10 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       this.targetChannel = channel;
     }
   }
+
+  protected async teardownClient(): Promise<void> {
+    this.client?.destroy();
+    this.client = undefined;
+    this.targetChannel = undefined;
+  }
 }

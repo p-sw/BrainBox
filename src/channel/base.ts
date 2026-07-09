@@ -158,6 +158,14 @@ export abstract class BaseChannel<
     }
   }
 
+  protected resolveCronPrefix() {
+    return `${this.brain.brainbase.brainId}_`;
+  }
+
+  protected resolveCronName(key: string) {
+    return this.resolveCronPrefix() + key;
+  }
+
   protected registerCron<T = undefined>(
     key: string,
     pattern: string,
@@ -166,40 +174,49 @@ export abstract class BaseChannel<
     new Cron(
       pattern,
       {
-        name: key,
+        name: this.resolveCronName(key),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        catch: (e) => logger.error(`Error while running cron ${key}: ${e}`),
+        catch: (e) =>
+          logger.error(
+            `Error while running cron ${this.resolveCronName(key)}: ${e}`,
+          ),
       },
       callback,
     );
   }
 
+  protected getRegisteredCrons() {
+    return scheduledJobs
+      .filter((c) => c.name && c.name.startsWith(this.resolveCronPrefix()))
+      .map((c) => c.name as string);
+  }
+
   protected pauseCron(key: string) {
-    const job = scheduledJobs.find((c) => c.name === key);
+    const job = scheduledJobs.find((c) => c.name === this.resolveCronName(key));
     if (!job) return false;
     job.pause();
   }
 
   protected resumeCron(key: string) {
-    const job = scheduledJobs.find((c) => c.name === key);
+    const job = scheduledJobs.find((c) => c.name === this.resolveCronName(key));
     if (!job) return false;
     job.resume();
   }
 
   protected removeCron(key: string) {
-    const job = scheduledJobs.find((c) => c.name === key);
+    const job = scheduledJobs.find((c) => c.name === this.resolveCronName(key));
     if (!job) return false;
     job.stop();
   }
 
   protected isCronStarted(key: string) {
-    const job = scheduledJobs.find((c) => c.name === key);
+    const job = scheduledJobs.find((c) => c.name === this.resolveCronName(key));
     if (!job) return false;
     return job.isRunning();
   }
 
   protected isCronBusy(key: string) {
-    const job = scheduledJobs.find((c) => c.name === key);
+    const job = scheduledJobs.find((c) => c.name === this.resolveCronName(key));
     if (!job) return false;
     return job.isBusy();
   }
@@ -334,6 +351,49 @@ export abstract class BaseChannel<
   protected registerActive(): void {
     BaseChannel.activeChannels.set(this.brain.brainbase.brainId, this);
   }
+
+  protected unregisterActive(): void {
+    BaseChannel.activeChannels.delete(this.brain.brainbase.brainId);
+  }
+
+  static all(): readonly BaseChannel[] {
+    return Array.from(BaseChannel.activeChannels.values());
+  }
+
+  static async shutdownAll(): Promise<void> {
+    await Promise.all(BaseChannel.all().map((c) => c.shutdown()));
+  }
+
+  /**
+   * Tear down this channel. Stops the crons we own, clears pending timers,
+   * removes us from the active-channels registry, and finally delegates
+   * client/bot teardown to the subclass via {@link teardownClient}.
+   */
+  async shutdown(): Promise<void> {
+    this.stopOwnCrons();
+    this.clearTimers();
+    this.unregisterActive();
+    await this.teardownClient();
+  }
+
+  protected stopOwnCrons(): void {
+    for (const key of this.getRegisteredCrons()) {
+      this.removeCron(key);
+    }
+  }
+
+  protected clearTimers(): void {
+    if (this.messageDebounce) {
+      clearTimeout(this.messageDebounce);
+      this.messageDebounce = null;
+    }
+    if (this.isChattingDebounce) {
+      clearTimeout(this.isChattingDebounce);
+      this.isChattingDebounce = null;
+    }
+  }
+
+  protected abstract teardownClient(): Promise<void>;
 
   protected engagePairing(): void {
     this.pairingMode = true;

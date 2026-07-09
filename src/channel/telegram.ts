@@ -113,4 +113,10 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
     this.history.push(entry);
     if (this.history.length > HISTORY_CAP) this.history.shift();
   }
+
+  protected async teardownClient(): Promise<void> {
+    if (!this.bot) return;
+    await this.bot.stop(1000);
+    this.bot = undefined;
+  }
 }
