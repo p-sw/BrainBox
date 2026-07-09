@@ -4,7 +4,7 @@ import {
   GatewayIntentBits,
   type SendableChannels,
 } from "discord.js";
-import type { AvailabilityStatus } from "@/openrouter/schema";
+import type { AvailabilityStatus } from "@/provider/schema";
 import { logger } from "@/utils/logger";
 import { BaseChannel, type PairingEntry, type PairingInbound } from "./base";
 import type { BrainItemDiscord } from "@/brain/manager";

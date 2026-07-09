@@ -1,5 +1,5 @@
 import { Bot } from "gramio";
-import type { AvailabilityStatus } from "@/openrouter/schema";
+import type { AvailabilityStatus } from "@/provider/schema";
 import { logger } from "@/utils/logger";
 import { BaseChannel, type PairingInbound, type PairingEntry } from "./base";
 import type { BrainItemTelegram } from "@/brain/manager";

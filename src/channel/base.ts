@@ -1,7 +1,7 @@
 import type { Brain } from "@/brain";
 import type { BrainItemWithChannel } from "@/brain/manager";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
-import type { AvailabilityStatus } from "@/openrouter/schema";
+import type { AvailabilityStatus } from "@/provider/schema";
 import { logger } from "@/utils/logger";
 import { formatDateKey } from "@/brain/schedule";
 import { Cron, scheduledJobs, type CronCallback } from "croner";

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import Supermemory from "supermemory";
 import { config } from "@/config";
-import { llm } from "@/openrouter";
-import { loadPrompt } from "@/openrouter/promptLoader";
+import { llm } from "@/provider";
+import { loadPrompt } from "@/provider/promptLoader";
 import {
   availabilitySchema,
   baseSystemPromptSchema,
@@ -14,7 +14,7 @@ import {
   type DailySchedule,
   type DailySlot,
   type MonthlySchedule,
-} from "@/openrouter/schema";
+} from "@/provider/schema";
 import { logger } from "@/utils/logger";
 import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
 import type {
