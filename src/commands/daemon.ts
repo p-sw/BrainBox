@@ -15,17 +15,14 @@ import { chmodSync, unlinkSync } from "node:fs";
 import { dispatch } from "./daemon/commands";
 
 import "./daemon/pairingCommand";
+import "./daemon/restartCommand";
 
-export async function daemon(): Promise<void> {
+export async function startChannels(): Promise<number> {
   const items = await brainManager.listAvailableBrain();
-  if (items.length === 0) {
-    logger.info("No activated brains with channels. Daemon idling.");
-  }
-
+  let started = 0;
   for (const item of items) {
     const brain = await Brain.load(item.brainId);
     if (!brain) continue;
-
     try {
       if (item.channel === "discord") {
         const channel = new DiscordChannel(brain as Brain<BrainItemDiscord>);
@@ -33,12 +30,14 @@ export async function daemon(): Promise<void> {
         logger.success(
           `Discord channel started: ${brain.brainbase.displayName}`,
         );
+        started += 1;
       } else if (item.channel === "telegram") {
         const channel = new TelegramChannel(brain as Brain<BrainItemTelegram>);
         await channel.init();
         logger.success(
           `Telegram channel started: ${brain.brainbase.displayName}`,
         );
+        started += 1;
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -47,7 +46,14 @@ export async function daemon(): Promise<void> {
       );
     }
   }
+  return started;
+}
 
+export async function daemon(): Promise<void> {
+  const started = await startChannels();
+  if (started === 0) {
+    logger.info("No activated brains with channels. Daemon idling.");
+  }
   await listenOnSocket();
 }
 
