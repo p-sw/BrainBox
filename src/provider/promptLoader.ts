@@ -1,6 +1,9 @@
 import { readFile } from "fs/promises";
 import path, { dirname } from "path";
 import { fileURLToPath } from "url";
+import { logger } from "@/utils/logger";
+
+const log = logger.child("prompt-loader");
 
 const prompts = [
   "PERSONA_INIT",
@@ -26,5 +29,8 @@ const PROMPTS_DIR = path.resolve(__dirname, "../../prompts");
 
 export async function loadPrompt(promptKey: PromptKey): Promise<string> {
   const filePath = path.join(PROMPTS_DIR, fileName(promptKey));
-  return readFile(filePath, "utf-8");
+  log.debug(`loadPrompt: ${promptKey} (${filePath})`);
+  const content = await readFile(filePath, "utf-8");
+  log.debug(`loadPrompt: ${promptKey} → ${content.length} chars`);
+  return content;
 }

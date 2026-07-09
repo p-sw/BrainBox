@@ -41,14 +41,19 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
     });
     if (this.brain.brainbase.discord.channelId) {
       this.isReady = true;
+      logger.debug(
+        `DiscordChannel.init: pre-bound channelId=${this.brain.brainbase.discord.channelId}`,
+      );
     } else {
       this.engagePairing();
+      logger.debug(`DiscordChannel.init: entering pairing mode`);
     }
     this.registerActive();
     this.client.once(Events.ClientReady, (c) => {
       logger.success(`Discord ready as ${c.user.tag}`);
       const channelId = this.brain.brainbase.discord.channelId;
       if (channelId && !this.targetChannel) {
+        logger.debug(`DiscordClientReady: resolving configured channel ${channelId}`);
         void this.resolveConfiguredChannel(channelId);
       }
     });
@@ -58,6 +63,9 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       if (!content) return;
       const channelId = this.brain.brainbase.discord.channelId;
       if (channelId !== undefined && msg.channelId !== channelId) {
+        logger.debug(
+          `MessageCreate: ignoring from channel=${msg.channelId} (not bound)`,
+        );
         return;
       }
       const inbound: PairingInbound = {
@@ -67,6 +75,7 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         channelId: msg.channelId,
       };
       if (channelId === undefined) {
+        logger.debug(`MessageCreate: routing to pairing (no channelId bound)`);
         void this.onPairing(inbound);
         return;
       }
@@ -76,8 +85,12 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         content,
       };
       this.pushHistory(entry);
+      logger.debug(
+        `MessageCreate: stored in history, dispatching (channel=${msg.channelId})`,
+      );
       void this.onMessage(entry);
     });
+    logger.debug(`DiscordChannel.init: logging in`);
     await this.client.login(this.brain.brainbase.discord.token);
   }
 
@@ -85,9 +98,18 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
     text: string,
     inbound: PairingInbound,
   ): Promise<void> {
-    if (!this.client || inbound.channelId === undefined) return;
+    if (!this.client || inbound.channelId === undefined) {
+      logger.debug(`sendPairingReply: no client or channelId, skip`);
+      return;
+    }
     const channel = await this.client.channels.fetch(inbound.channelId);
-    if (!channel || !channel.isSendable()) return;
+    if (!channel || !channel.isSendable()) {
+      logger.debug(
+        `sendPairingReply: channel ${inbound.channelId} not sendable`,
+      );
+      return;
+    }
+    logger.debug(`sendPairingReply: posting to ${inbound.channelId}`);
     await channel.send({
       content: text,
       ...(inbound.replyTo
@@ -121,6 +143,9 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         "DiscordChannel.send: no channel yet (no inbound message)",
       );
     }
+    logger.debug(
+      `send: posting ${text.length} chars${opts?.replyTo ? ` (reply to ${opts.replyTo})` : ""}`,
+    );
     if (opts?.replyTo) {
       await channel.send({
         content: text,
@@ -132,8 +157,13 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   }
 
   async setAvailability(status: AvailabilityStatus): Promise<void> {
-    if (!this.client?.user) return;
-    this.client.user.setStatus(AVAILABILITY_STATUS_MAP[status]);
+    if (!this.client?.user) {
+      logger.debug(`setAvailability: no client/user, skip`);
+      return;
+    }
+    const mapped = AVAILABILITY_STATUS_MAP[status];
+    logger.debug(`setAvailability: ${status} → ${mapped}`);
+    this.client.user.setStatus(mapped);
   }
 
   async getMessageHistoryBetween(
@@ -149,26 +179,47 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   }
 
   private async resolveSendChannel(): Promise<SendableChannels | undefined> {
-    if (this.targetChannel) return this.targetChannel;
-    if (!this.client?.isReady()) return undefined;
+    if (this.targetChannel) {
+      logger.debug(`resolveSendChannel: cache hit`);
+      return this.targetChannel;
+    }
+    if (!this.client?.isReady()) {
+      logger.debug(`resolveSendChannel: client not ready, returning undefined`);
+      return undefined;
+    }
     const channelId = this.brain.brainbase.discord.channelId;
-    if (!channelId) return undefined;
+    if (!channelId) {
+      logger.debug(`resolveSendChannel: no channelId bound`);
+      return undefined;
+    }
+    logger.debug(`resolveSendChannel: fetching ${channelId}`);
     const channel = await this.client.channels.fetch(channelId);
     if (channel && channel.isSendable()) {
       this.targetChannel = channel;
+      logger.debug(`resolveSendChannel: cached`);
+    } else {
+      logger.debug(`resolveSendChannel: ${channelId} not sendable`);
     }
     return this.targetChannel;
   }
 
   private async resolveConfiguredChannel(channelId: string): Promise<void> {
-    if (!this.client) return;
+    if (!this.client) {
+      logger.debug(`resolveConfiguredChannel: no client`);
+      return;
+    }
+    logger.debug(`resolveConfiguredChannel: fetching ${channelId}`);
     const channel = await this.client.channels.fetch(channelId);
     if (channel && channel.isSendable()) {
       this.targetChannel = channel;
+      logger.debug(`resolveConfiguredChannel: cached`);
+    } else {
+      logger.debug(`resolveConfiguredChannel: ${channelId} not sendable`);
     }
   }
 
   protected async teardownClient(): Promise<void> {
+    logger.debug(`teardownClient: destroying discord client`);
     this.client?.destroy();
     this.client = undefined;
     this.targetChannel = undefined;

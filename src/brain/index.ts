@@ -17,6 +17,8 @@ import {
 } from "@/provider/schema";
 import { logger } from "@/utils/logger";
 import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
+
+const log = logger.child("brain");
 import type {
   ChatAssistantMessage,
   ChatChoice,
@@ -50,20 +52,29 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     private space: Space,
     public brainbase: BB,
     public memory: Memory = new Memory(this.db, this.space),
-  ) {}
+  ) {
+    log.debug(
+      `Brain constructed: id=${brainbase.brainId} name=${brainbase.displayName} space=${space.name}`,
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Domain methods
   // ---------------------------------------------------------------------------
 
   async createDailySchedule(datetime: Date): Promise<DailySchedule | null> {
+    const dateKey = formatDateKey(datetime);
+    log.debug(`createDailySchedule: starting for ${dateKey}`);
     try {
-      const dateKey = formatDateKey(datetime);
       const existing = await this.memory.get(`daily-schedule:${dateKey}`);
       if (existing) {
+        log.debug(`createDailySchedule: cache hit for ${dateKey}`);
         try {
           return JSON.parse(existing.content) as DailySchedule;
-        } catch {
+        } catch (parseErr) {
+          log.debug(
+            `createDailySchedule: stored schedule malformed, regenerating: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+          );
           // fall through to regeneration if stored content is malformed
         }
       }
@@ -71,6 +82,9 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
       const twoDaysAgo = new Date(datetime);
       twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
       const twoDaysAgoKey = formatDateKey(twoDaysAgo);
+      log.debug(
+        `createDailySchedule: gathering context (monthly, history, ${twoDaysAgoKey})`,
+      );
       const [monthlySummary, history, twoDaysAgoStored] = await Promise.all([
         this.getMonthlySummaryForDay(datetime),
         this.getHistoryFacts(),
@@ -82,8 +96,12 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           twoDaysAgoSchedule = JSON.parse(
             twoDaysAgoStored.content,
           ) as DailySchedule;
+          log.debug(
+            `createDailySchedule: loaded prior schedule with ${twoDaysAgoSchedule.items.length} slots`,
+          );
         } catch {
           twoDaysAgoSchedule = null;
+          log.debug(`createDailySchedule: prior schedule malformed, ignoring`);
         }
       }
 
@@ -105,12 +123,16 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         history,
       ].join("\n\n");
 
+      log.debug(`createDailySchedule: calling identity model`);
       const schedule = await llm.call<DailySchedule>(llm.models.identity, {
         instruction,
         message: promptMessage,
         jsonSchemaName: "daily-schedule",
         jsonSchema: dailyScheduleSchema,
       });
+      log.debug(
+        `createDailySchedule: model returned ${schedule.items.length} slots`,
+      );
 
       await this.memory.add({
         customId: `daily-schedule:${dateKey}`,
@@ -121,6 +143,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           date: dateKey,
         },
       });
+      log.debug(`createDailySchedule: persisted ${dateKey}`);
 
       return schedule;
     } catch (error) {
@@ -136,25 +159,33 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   }
 
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
+    const year =
+      datetime.getMonth() === 11
+        ? datetime.getFullYear() + 1
+        : datetime.getFullYear();
+    const month = (datetime.getMonth() + 1) % 12;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const monthKey = `${year}-${pad2(month + 1)}`;
+    log.debug(`createMonthlySchedule: starting for ${monthKey}`);
     try {
-      const year =
-        datetime.getMonth() === 11
-          ? datetime.getFullYear() + 1
-          : datetime.getFullYear();
-      const month = (datetime.getMonth() + 1) % 12;
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
-      const monthKey = `${year}-${pad2(month + 1)}`;
       const existing = await this.memory.get(`monthly-schedule:${monthKey}`);
       if (existing) {
+        log.debug(`createMonthlySchedule: cache hit for ${monthKey}`);
         try {
           return JSON.parse(existing.content) as MonthlySchedule;
-        } catch {
+        } catch (parseErr) {
+          log.debug(
+            `createMonthlySchedule: stored schedule malformed, regenerating: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+          );
           // fall through to regeneration if stored content is malformed
         }
       }
 
       const twoMonthsAgo = new Date(year, month - 2, 1);
       const twoMonthsAgoKey = `${twoMonthsAgo.getFullYear()}-${pad2(twoMonthsAgo.getMonth() + 1)}`;
+      log.debug(
+        `createMonthlySchedule: gathering context (history, ${twoMonthsAgoKey})`,
+      );
       const [history, twoMonthsAgoStored] = await Promise.all([
         this.getHistoryFacts(),
         this.memory.get(`monthly-schedule:${twoMonthsAgoKey}`),
@@ -165,8 +196,12 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           twoMonthsAgoSchedule = JSON.parse(
             twoMonthsAgoStored.content,
           ) as MonthlySchedule;
+          log.debug(
+            `createMonthlySchedule: loaded prior schedule with ${twoMonthsAgoSchedule.items.length} days`,
+          );
         } catch {
           twoMonthsAgoSchedule = null;
+          log.debug(`createMonthlySchedule: prior schedule malformed, ignoring`);
         }
       }
 
@@ -185,12 +220,16 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         history,
       ].join("\n\n");
 
+      log.debug(`createMonthlySchedule: calling identity model`);
       const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
         instruction,
         message: promptMessage,
         jsonSchemaName: "monthly-schedule",
         jsonSchema: monthlyScheduleSchema,
       });
+      log.debug(
+        `createMonthlySchedule: model returned ${schedule.items.length} days`,
+      );
 
       await this.memory.add({
         customId: `monthly-schedule:${monthKey}`,
@@ -201,6 +240,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           month: monthKey,
         },
       });
+      log.debug(`createMonthlySchedule: persisted ${monthKey}`);
 
       return schedule;
     } catch (error) {
@@ -214,8 +254,11 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     datetime: Date = new Date(),
     history: ReadonlyArray<MessageHistoryEntry>,
   ): Promise<string | null> {
-    if (history.length === 0) return null;
-
+    if (history.length === 0) {
+      log.debug(`sleepMemory: no history, skipping`);
+      return null;
+    }
+    log.debug(`sleepMemory: starting, ${history.length} messages`);
     try {
       const dateKey = formatDateKey(datetime);
       const instruction = await loadPrompt("MEMOIR");
@@ -230,10 +273,12 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         historyBlock,
       ].join("\n\n");
 
+      log.debug(`sleepMemory: calling identity model`);
       const memoir = await llm.call<string>(llm.models.identity, {
         instruction,
         message: promptMessage,
       });
+      log.debug(`sleepMemory: model returned ${memoir.length} chars`);
 
       await this.memory.add({
         customId: `daily-journal:${dateKey}`,
@@ -244,6 +289,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           date: dateKey,
         },
       });
+      log.debug(`sleepMemory: journal persisted for ${dateKey}`);
 
       return memoir;
     } catch (error) {
@@ -256,19 +302,28 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   async getTodayScheduledAvailability(
     datetime: Date,
   ): Promise<AvailabilityWindows | null> {
+    const dateKey = formatDateKey(datetime);
     try {
-      const dateKey = formatDateKey(datetime);
       const cached = this.availabilityCache.get(dateKey);
-      if (cached) return cached;
+      if (cached) {
+        log.debug(`getTodayScheduledAvailability: cache hit for ${dateKey}`);
+        return cached;
+      }
 
       const stored = await this.memory.get(`daily-schedule:${dateKey}`);
-      if (!stored) return null;
+      if (!stored) {
+        log.debug(`getTodayScheduledAvailability: no schedule for ${dateKey}`);
+        return null;
+      }
 
       const dailySchedule = JSON.parse(stored.content) as DailySchedule;
       const availability =
         await this.deriveAvailabilityFromSchedule(dailySchedule);
 
       this.availabilityCache.set(dateKey, availability);
+      log.debug(
+        `getTodayScheduledAvailability: cached ${availability.items.length} windows for ${dateKey}`,
+      );
       return availability;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -290,17 +345,27 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     const match = windows?.items.find(
       (w) => toMinutes(w.start) <= current && current < toMinutes(w.end),
     );
-    return match ?? { start: hhmm, end: hhmm, status: "offline" };
+    const result = match ?? { start: hhmm, end: hhmm, status: "offline" };
+    log.debug(
+      `getAvailability: now=${hhmm} status=${result.status} (${windows?.items.length ?? 0} windows on file)`,
+    );
+    return result;
   }
 
   async getCurrentAndAdjacentSlots(now: Date): Promise<DailySlot[]> {
     const dateKey = formatDateKey(now);
     const stored = await this.memory.get(`daily-schedule:${dateKey}`);
-    if (!stored) return [];
+    if (!stored) {
+      log.debug(`getCurrentAndAdjacentSlots: no schedule for ${dateKey}`);
+      return [];
+    }
     let schedule: DailySchedule;
     try {
       schedule = JSON.parse(stored.content) as DailySchedule;
-    } catch {
+    } catch (parseErr) {
+      log.debug(
+        `getCurrentAndAdjacentSlots: stored schedule malformed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+      );
       return [];
     }
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -313,13 +378,25 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         toMinutes(slot.start) <= currentMinutes &&
         currentMinutes < toMinutes(slot.end),
     );
-    if (index === -1) return [];
-    return schedule.items.slice(Math.max(0, index - 1), index + 2);
+    if (index === -1) {
+      log.debug(
+        `getCurrentAndAdjacentSlots: no matching slot at ${now.toTimeString().slice(0, 5)}`,
+      );
+      return [];
+    }
+    const slice = schedule.items.slice(Math.max(0, index - 1), index + 2);
+    log.debug(
+      `getCurrentAndAdjacentSlots: index=${index} returned ${slice.length} slots`,
+    );
+    return slice;
   }
 
   async deriveAvailabilityFromSchedule(
     schedule: DailySchedule,
   ): Promise<AvailabilityWindows> {
+    log.debug(
+      `deriveAvailabilityFromSchedule: ${schedule.items.length} slots → model`,
+    );
     try {
       const instruction = await loadPrompt("SCHEDULE_AVAILABILITY");
       const promptMessage = JSON.stringify({
@@ -327,12 +404,16 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         personality: this.brainbase.baseSystemPrompt,
       });
 
-      return await llm.call<AvailabilityWindows>(llm.models.identity, {
+      const result = await llm.call<AvailabilityWindows>(llm.models.identity, {
         instruction,
         message: promptMessage,
         jsonSchemaName: "availability",
         jsonSchema: availabilitySchema,
       });
+      log.debug(
+        `deriveAvailabilityFromSchedule: ${result.items.length} windows`,
+      );
+      return result;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.error(`deriveAvailabilityFromSchedule failed: ${reason}`);
@@ -342,14 +423,24 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
 
   invalidateScheduledAvailability(datetime: Date = new Date()): void {
     const todayKey = formatDateKey(datetime);
+    let removed = 0;
     for (const key of this.availabilityCache.keys()) {
       if (key < todayKey) {
         this.availabilityCache.delete(key);
+        removed += 1;
       }
+    }
+    if (removed > 0) {
+      log.debug(
+        `invalidateScheduledAvailability: dropped ${removed} stale cache entries (<${todayKey})`,
+      );
     }
   }
 
   async persistBrainBase(): Promise<void> {
+    log.debug(
+      `persistBrainBase: id=${this.brainbase.brainId} name=${this.brainbase.displayName}`,
+    );
     await brainManager.saveBrain(this.brainbase.brainId, this.brainbase);
   }
 
@@ -367,6 +458,10 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     const maxSteps = options.maxSteps ?? 20;
     const initiate = options.initiate ?? false;
     const send = options.send ?? (async () => {});
+
+    log.debug(
+      `sendMessage: start initiate=${initiate} history=${history.length} new=${newMessages.length} maxSteps=${maxSteps}`,
+    );
 
     const replyMessages: string[] = [];
     const tools: ChatFunctionTool[] = buildSendMessageTools();
@@ -412,6 +507,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     ];
 
     for (let step = 0; step < maxSteps; step += 1) {
+      log.debug(`sendMessage: step ${step + 1}/${maxSteps} → model`);
       let choice: ChatChoice;
       try {
         choice = await llm.chatWithTools(llm.models.conversation, {
@@ -431,7 +527,14 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         typeof assistantMessage.content === "string" &&
         assistantMessage.content.length > 0;
 
+      log.debug(
+        `sendMessage: step ${step + 1} → toolCalls=${toolCalls.length} hasContent=${hasContent}`,
+      );
+
       if (toolCalls.length === 0) {
+        log.debug(
+          `sendMessage: model returned no tool calls; finalising with ${replyMessages.length} replies`,
+        );
         return replyMessages;
       }
 
@@ -443,8 +546,15 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
             call.function.arguments,
           );
           if (content !== null) {
+            log.debug(
+              `sendMessage: addReplyMessage[${replyMessages.length}] (${content.length} chars)`,
+            );
             send(content);
             replyMessages.push(content);
+          } else {
+            log.debug(
+              `sendMessage: addReplyMessage rejected (invalid arguments: ${call.function.arguments})`,
+            );
           }
           messages.push({
             role: "tool",
@@ -457,6 +567,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           continue;
         }
         if (call.function.name === "searchMemory") {
+          log.debug(`sendMessage: searchMemory tool call`);
           const result = await this.executeSearchTool(call.function.arguments);
           messages.push({
             role: "tool",
@@ -465,6 +576,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           });
           continue;
         }
+        log.debug(`sendMessage: unknown tool "${call.function.name}"`);
         messages.push({
           role: "tool",
           toolCallId: call.id,
@@ -479,6 +591,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         !hasContent &&
         toolCalls.every((c) => c.function.name === "searchMemory")
       ) {
+        log.debug(`sendMessage: step was pure searchMemory, looping back`);
         continue;
       }
     }
@@ -548,17 +661,21 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   private async executeSearchTool(argumentsJson: string): Promise<string> {
     const query = parseSearchArguments(argumentsJson);
     if (!query) {
+      log.debug(`executeSearchTool: missing/invalid query in args`);
       return JSON.stringify({ ok: false, error: "missing query" });
     }
+    log.debug(`executeSearchTool: query="${query}"`);
     try {
       const hits = await this.memory.search(query, 5);
       const compact = hits.map((hit) => ({
         content: hit.content,
         score: hit.score,
       }));
+      log.debug(`executeSearchTool: ${compact.length} hits returned to model`);
       return JSON.stringify({ ok: true, hits: compact });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      log.debug(`executeSearchTool: failed: ${reason}`);
       return JSON.stringify({ ok: false, error: reason });
     }
   }
@@ -567,13 +684,22 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     try {
       const monthKey = formatMonthKey(target);
       const stored = await this.memory.get(`monthly-schedule:${monthKey}`);
-      if (!stored) return null;
+      if (!stored) {
+        log.debug(`getMonthlySummaryForDay: no monthly schedule for ${monthKey}`);
+        return null;
+      }
 
       const monthly = JSON.parse(stored.content) as MonthlySchedule;
       const day = target.getDate();
       const entry = monthly.items.find((d) => d.day === day);
+      log.debug(
+        `getMonthlySummaryForDay: month=${monthKey} day=${day} ${entry ? "hit" : "miss"}`,
+      );
       return entry?.summary ?? null;
-    } catch {
+    } catch (parseErr) {
+      log.debug(
+        `getMonthlySummaryForDay: parse failed: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+      );
       return null;
     }
   }
@@ -581,11 +707,16 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   async getHistoryFacts(): Promise<string> {
     try {
       const docs = await this.memory.list();
-      return docs
+      const text = docs
         .map((d) => d.content)
         .slice(-30)
         .join("\n");
-    } catch {
+      log.debug(`getHistoryFacts: ${docs.length} docs, ${text.length} chars`);
+      return text;
+    } catch (err) {
+      log.debug(
+        `getHistoryFacts: failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       return "";
     }
   }
@@ -594,16 +725,22 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     displayName: string,
     seed: string,
   ): Promise<{ brainId: string } | null> {
+    log.debug(`Brain.create: starting name="${displayName}"`);
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
+      log.debug(`Brain.create: generating description`);
       const description = await llm.call<string>(llm.models.identity, {
         instruction: personaInitInstruction,
         message: seed,
       });
+      log.debug(
+        `Brain.create: description returned (${description.length} chars)`,
+      );
 
       const personaSystemInstruction = await loadPrompt(
         "PERSONA_BASE_SYSTEM_PROMPT",
       );
+      log.debug(`Brain.create: generating base system prompt + dials`);
       const generated = await llm.call<BaseSystemPromptGeneration>(
         llm.models.identity,
         {
@@ -612,6 +749,9 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           jsonSchemaName: "base-system-prompt",
           jsonSchema: baseSystemPromptSchema,
         },
+      );
+      log.debug(
+        `Brain.create: dials dndProb=${generated.dndReplyProbability} startCountThreshold=${generated.startConversationCountThreshold} startTimeThreshold=${generated.startConversationTimeThreshold}`,
       );
 
       const personaSystemFixed = await loadPrompt(
@@ -646,8 +786,10 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
         content: description,
         metadata: { kind: "persona", source: "persona-init" },
       });
+      log.debug(`Brain.create: persona description stored`);
 
       await brainManager.saveBrain(brainId, brainbase);
+      log.debug(`Brain.create: brainbase saved (id=${brainId})`);
       return { brainId };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -657,8 +799,12 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   }
 
   static async delete(brainId: string): Promise<boolean> {
+    log.debug(`Brain.delete: id=${brainId}`);
     const brainbase = await brainManager.loadBrain(brainId);
-    if (!brainbase) return false;
+    if (!brainbase) {
+      log.debug(`Brain.delete: no brainbase found`);
+      return false;
+    }
 
     const db = new Supermemory({ apiKey: config.supermemoryApiKey });
     const memory = new Memory(db, { name: brainbase.spaceName });
@@ -672,15 +818,21 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     }
 
     await brainManager.deleteBrain(brainId);
+    log.debug(`Brain.delete: done id=${brainId}`);
     return true;
   }
 
   static async load(brainId: string): Promise<Brain | null> {
+    log.debug(`Brain.load: id=${brainId}`);
     const brainbase = await brainManager.loadBrain(brainId);
-    if (!brainbase || !brainManager.isBrainReady(brainbase)) return null;
+    if (!brainbase || !brainManager.isBrainReady(brainbase)) {
+      log.debug(`Brain.load: not loadable (missing or not ready)`);
+      return null;
+    }
 
     const db = new Supermemory({ apiKey: config.supermemoryApiKey });
     const space: Space = { name: brainbase.spaceName };
+    log.debug(`Brain.load: ready (channel=${brainbase.channel})`);
     return new Brain(db, space, brainbase);
   }
 }

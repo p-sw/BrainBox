@@ -8,6 +8,7 @@ interface RestartResponse extends DaemonResponse {
 }
 
 export async function restart(): Promise<void> {
+  logger.debug(`restart: sending restart to daemon`);
   // ponytail: sendToDaemon logs and process.exit(1)s on any failure — no try/catch needed.
   const response = await sendToDaemon<RestartResponse>({ command: "restart" });
   const count = response.result?.restarted ?? 0;

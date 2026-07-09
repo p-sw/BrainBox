@@ -1,5 +1,6 @@
 import { config } from "@/config";
 import { OpenRouter } from "@openrouter/sdk";
+import { logger } from "@/utils/logger";
 import type {
   ChatAssistantMessage,
   ChatChoice,
@@ -7,6 +8,8 @@ import type {
   ChatMessages,
   ChatRequestEffort,
 } from "@openrouter/sdk/models";
+
+const log = logger.child("llm");
 
 const CONVERSATION_MODEL = "x-ai/grok-4.3" as const;
 const IDENTITY_MODEL = "openai/gpt-5.4-mini" as const;
@@ -51,6 +54,10 @@ export class LLMExecutor {
   }
 
   async call<T>(model: MODELS, options: StructuredOptions) {
+    const jsonMode = "jsonSchemaName" in options;
+    log.debug(
+      `llm.call: model=${model} jsonSchema=${jsonMode ? options.jsonSchemaName : "-"} msgLen=${options.message.length}`,
+    );
     const result = await this.client.chat.send({
       chatRequest: {
         model,
@@ -86,8 +93,10 @@ export class LLMExecutor {
 
     const content = result.choices[0]?.message?.content;
     if (!content) {
+      log.debug(`llm.call: empty content in choice 0`);
       throw new Error("Empty response from model");
     }
+    log.debug(`llm.call: response ${content.length} chars`);
 
     if ("jsonSchemaName" in options) {
       return JSON.parse(content) as T;
@@ -100,6 +109,9 @@ export class LLMExecutor {
     model: MODELS,
     options: ChatWithToolsOptions,
   ): Promise<ChatChoice> {
+    log.debug(
+      `llm.chatWithTools: model=${model} msgs=${options.messages.length} tools=${options.tools.length}`,
+    );
     const result = await this.client.chat.send({
       chatRequest: {
         model,
@@ -124,8 +136,15 @@ export class LLMExecutor {
 
     const choice = result.choices[0];
     if (!choice) {
+      log.debug(`llm.chatWithTools: no choice in response`);
       throw new Error("LLM returned no choice");
     }
+    const calls = choice.message.toolCalls?.length ?? 0;
+    const textLen =
+      typeof choice.message.content === "string"
+        ? choice.message.content.length
+        : 0;
+    log.debug(`llm.chatWithTools: choice toolCalls=${calls} text=${textLen}`);
     return choice;
   }
 }

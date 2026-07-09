@@ -23,6 +23,9 @@ export interface DaemonResponse<T = unknown> {
 export async function sendToDaemon<
   T extends DaemonResponse = DaemonResponse,
 >(payload: { command: string; args?: unknown }): Promise<T> {
+  logger.debug(
+    `sendToDaemon: command="${payload.command}" args=${JSON.stringify(payload.args) ?? "null"}`,
+  );
   let reply: T;
   try {
     reply = await exchangeOnce<T>(payload);
@@ -33,6 +36,9 @@ export async function sendToDaemon<
     );
     process.exit(1);
   }
+  logger.debug(
+    `sendToDaemon: command="${payload.command}" reply ok=${reply.ok}`,
+  );
   if (!reply.ok) {
     logger.error(reply.error ?? `daemon command "${payload.command}" failed`);
     process.exit(1);
@@ -61,13 +67,17 @@ function exchangeOnce<T>(payload: object): Promise<T> {
         if (line.length === 0) continue;
         try {
           finish(() => resolve(JSON.parse(line) as T));
-        } catch {
+        } catch (parseErr) {
+          logger.debug(
+            `exchangeOnce: invalid daemon reply: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+          );
           finish(() => reject(new Error("invalid response from daemon")));
         }
         return;
       }
     });
     socket.on("error", (err) => {
+      logger.debug(`exchangeOnce: socket error: ${err.message}`);
       finish(() => reject(err));
     });
     socket.write(JSON.stringify(payload) + "\n");

@@ -7,6 +7,7 @@ import { logger } from "@/utils/logger";
 
 export async function listBrains(): Promise<void> {
   const brains = await brainManager.listBrains();
+  logger.debug(`listBrains: ${brains.length} brain(s)`);
   if (brains.length === 0) {
     logger.info("No brains found.");
     return;
@@ -23,6 +24,7 @@ async function setActivated(
   brainId: string,
   activated: boolean,
 ): Promise<void> {
+  logger.debug(`setActivated: id=${brainId} → ${activated}`);
   const brain = await brainManager.loadBrain(brainId);
   if (!brain) {
     logger.error(`Brain not found: ${brainId}`);
@@ -51,6 +53,7 @@ export async function createBrain(
   displayName: string,
   seed: string,
 ): Promise<void> {
+  logger.debug(`createBrain: name="${displayName}" seed length=${seed.length}`);
   const result = await Brain.create(displayName, seed);
   if (!result) {
     process.exitCode = 1;
@@ -62,6 +65,7 @@ export async function createBrain(
 }
 
 export async function removeBrain(brainId: string): Promise<void> {
+  logger.debug(`removeBrain: id=${brainId}`);
   const brain = await brainManager.loadBrain(brainId);
   if (!brain) {
     logger.error(`Brain not found: ${brainId}`);

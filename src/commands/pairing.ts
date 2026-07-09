@@ -9,6 +9,7 @@ interface PairingResponse extends DaemonResponse {
 }
 
 export async function pair(code: string): Promise<void> {
+  logger.debug(`pair: sending code "${code}" to daemon`);
   // ponytail: sendToDaemon logs and process.exit(1)s on any failure — no try/catch needed here.
   const response = await sendToDaemon<PairingResponse>({
     command: "pairing",

@@ -4,6 +4,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { logger } from "@/utils/logger";
+import { config } from "@/config";
 import { register as daemon } from "@/commands/daemon";
 import { register as brain } from "@/commands/brain";
 import { register as pairing } from "@/commands/pairing";
@@ -11,6 +12,14 @@ import { register as restart } from "@/commands/restart";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// ponytail: one line to translate the user-facing `debug: true` flag in
+// brainbox.yaml into the logger's internal level. The level is the only thing
+// debug mode changes — no separate stream, no extra format.
+logger.configure({ level: config.debug ? "debug" : "info" });
+logger.debug(
+  `brainbox starting (debug=${config.debug}, root=${config.brainboxRoot})`,
+);
 
 function getVersion(): string {
   try {

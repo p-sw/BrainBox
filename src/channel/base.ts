@@ -67,11 +67,19 @@ export abstract class BaseChannel<
       async () => {
         const dateKey = formatDateKey(new Date());
         const availability = await this.brain.getAvailability();
-        if (availability.status !== "offline") return;
+        if (availability.status !== "offline") {
+          logger.debug(
+            `sleepMemory cron: skip — availability=${availability.status}`,
+          );
+          return;
+        }
         const existing = await this.brain.memory.get(
           `daily-journal:${dateKey}`,
         );
-        if (existing) return;
+        if (existing) {
+          logger.debug(`sleepMemory cron: skip — journal for ${dateKey} exists`);
+          return;
+        }
         const history = await this.getMessageHistoryBetween(
           new Date(Date.now() - 24 * 60 * 60 * 1000),
           new Date(),
@@ -97,6 +105,9 @@ export abstract class BaseChannel<
   }
 
   private async regenerateSchedules(): Promise<void> {
+    logger.debug(
+      `regenerateSchedules: tick for ${this.brain.brainbase.displayName}`,
+    );
     const today = new Date();
     const tomorrow = new Date(
       today.getFullYear(),
@@ -113,6 +124,7 @@ export abstract class BaseChannel<
       today.getDate(),
     );
     await this.brain.createMonthlySchedule(nextMonth);
+    logger.debug(`regenerateSchedules: done`);
   }
 
   private async runStartConversation(): Promise<void> {
@@ -171,15 +183,17 @@ export abstract class BaseChannel<
     pattern: string,
     callback: CronCallback<T>,
   ) {
+    const name = this.resolveCronName(key);
+    logger.debug(`registerCron: ${name} (${pattern})`);
     new Cron(
       pattern,
       {
-        name: this.resolveCronName(key),
+        name,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        catch: (e) =>
-          logger.error(
-            `Error while running cron ${this.resolveCronName(key)}: ${e}`,
-          ),
+        catch: (e) => {
+          logger.error(`Error while running cron ${name}: ${e}`);
+          logger.debug(`Cron ${name} stack: ${e instanceof Error ? e.stack : "(no stack)"}`);
+        },
       },
       callback,
     );
@@ -223,6 +237,9 @@ export abstract class BaseChannel<
 
   async onMessage(message: MessageHistoryEntry) {
     this.ensureAvailabilityWatcher();
+    logger.debug(
+      `onMessage: received (${message.content.length} chars, sender=${message.sender})`,
+    );
     const availability = await this.brain.getAvailability();
     if (availability.status === "offline") {
       this.deferMessage(message, "offline");
@@ -236,9 +253,15 @@ export abstract class BaseChannel<
       this.deferMessage(message, "dnd");
       return;
     }
+    logger.debug(
+      `onMessage: passing through (availability=${availability.status})`,
+    );
 
     if (!this.isSending) {
       this.messageInQueue.push(message);
+      logger.debug(
+        `onMessage: queued (queueSize=${this.messageInQueue.length})`,
+      );
       if (this.messageDebounce) clearTimeout(this.messageDebounce);
       this.messageDebounce = setTimeout(async () => {
         const newUserMessages = this.messageInQueue.splice(
@@ -246,6 +269,9 @@ export abstract class BaseChannel<
           this.messageInQueue.length,
         );
         this.messageDebounce = null;
+        logger.debug(
+          `onMessage: debounce fired, dispatching ${newUserMessages.length} message(s)`,
+        );
         const now = new Date();
         const twoDaysAgo = new Date(now);
         twoDaysAgo.setDate(now.getDate() - 2);
@@ -258,6 +284,9 @@ export abstract class BaseChannel<
           );
         } catch (e) {
           logger.error(`Error while sending message: ${e}`);
+          logger.debug(
+            `onMessage: sendMessage threw — ${e instanceof Error ? e.stack : String(e)}`,
+          );
         } finally {
           this.isSending = false;
 
@@ -265,6 +294,9 @@ export abstract class BaseChannel<
             const queueMessages = this.isSendingQueue.splice(
               0,
               this.isSendingQueue.length,
+            );
+            logger.debug(
+              `onMessage: draining ${queueMessages.length} queued message(s) from isSendingQueue`,
             );
             let lastMessage: MessageHistoryEntry | undefined = undefined;
             while (!lastMessage && queueMessages.length > 0) {
@@ -278,6 +310,9 @@ export abstract class BaseChannel<
         }
       }, MESSAGE_DEBOUNCE_MS);
     } else {
+      logger.debug(
+        `onMessage: isSending — buffering into isSendingQueue (size=${this.isSendingQueue.length + 1})`,
+      );
       this.isSendingQueue.push(message);
     }
 
@@ -291,6 +326,9 @@ export abstract class BaseChannel<
 
   private ensureAvailabilityWatcher(): void {
     if (this.isCronStarted(AVAILABILITY_WATCHER_KEY)) return;
+    logger.debug(
+      `ensureAvailabilityWatcher: starting ${AVAILABILITY_WATCHER_PATTERN} watcher`,
+    );
     this.registerCron(
       AVAILABILITY_WATCHER_KEY,
       AVAILABILITY_WATCHER_PATTERN,
@@ -298,6 +336,9 @@ export abstract class BaseChannel<
         const current = await this.brain.getAvailability();
         const prev = this.previousAvailability;
         this.previousAvailability = current.status;
+        logger.debug(
+          `availabilityWatcher: ${prev ?? "(initial)"} → ${current.status}`,
+        );
         if (prev !== null && prev !== "online" && current.status === "online") {
           await this.flushDeferred();
         }
@@ -306,10 +347,19 @@ export abstract class BaseChannel<
   }
 
   private async flushDeferred(): Promise<void> {
-    if (this.deferredQueue.length === 0) return;
+    if (this.deferredQueue.length === 0) {
+      logger.debug(`flushDeferred: nothing to flush`);
+      return;
+    }
     const current = await this.brain.getAvailability();
-    if (current.status !== "online") return;
+    if (current.status !== "online") {
+      logger.debug(
+        `flushDeferred: skip — still ${current.status} (deferred size=${this.deferredQueue.length})`,
+      );
+      return;
+    }
     const drained = this.deferredQueue.splice(0, this.deferredQueue.length);
+    logger.debug(`flushDeferred: replaying ${drained.length} message(s)`);
     for (const msg of drained) {
       void this.onMessage(msg);
     }
@@ -370,10 +420,14 @@ export abstract class BaseChannel<
    * client/bot teardown to the subclass via {@link teardownClient}.
    */
   async shutdown(): Promise<void> {
+    logger.debug(
+      `shutdown: tearing down ${this.brain.brainbase.displayName}`,
+    );
     this.stopOwnCrons();
     this.clearTimers();
     this.unregisterActive();
     await this.teardownClient();
+    logger.debug(`shutdown: done`);
   }
 
   protected stopOwnCrons(): void {

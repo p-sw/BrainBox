@@ -22,8 +22,12 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
     this.chatId = this.brain.brainbase.telegram.chatId;
     if (this.chatId !== undefined) {
       this.isReady = true;
+      logger.debug(
+        `TelegramChannel.init: pre-bound chatId=${this.chatId}`,
+      );
     } else {
       this.engagePairing();
+      logger.debug(`TelegramChannel.init: entering pairing mode`);
     }
     this.registerActive();
     this.bot.onStart(({ info }) => {
@@ -35,6 +39,9 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
       if (!text) return;
       const chatId = this.brain.brainbase.telegram.chatId;
       if (chatId !== undefined && ctx.chat.id !== chatId) {
+        logger.debug(
+          `Telegram message: ignoring chat=${ctx.chat.id} (not bound to ${chatId})`,
+        );
         return;
       }
       const inbound: PairingInbound = {
@@ -44,6 +51,9 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
         chatId: ctx.chat.id,
       };
       if (chatId === undefined) {
+        logger.debug(
+          `Telegram message: routing to pairing (no chatId bound)`,
+        );
         void this.onPairing(inbound);
         return;
       }
@@ -54,8 +64,12 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
         content: text,
       };
       this.pushHistory(entry);
+      logger.debug(
+        `Telegram message: stored in history, dispatching (chat=${ctx.chat.id})`,
+      );
       void this.onMessage(entry);
     });
+    logger.debug(`TelegramChannel.init: starting bot`);
     await this.bot.start();
   }
 
@@ -63,7 +77,11 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
     text: string,
     inbound: PairingInbound,
   ): Promise<void> {
-    if (!this.bot || inbound.chatId === undefined) return;
+    if (!this.bot || inbound.chatId === undefined) {
+      logger.debug(`sendPairingReply: no bot or chatId, skip`);
+      return;
+    }
+    logger.debug(`sendPairingReply: posting to ${inbound.chatId}`);
     await this.bot.api.sendMessage({
       chat_id: inbound.chatId,
       text,
@@ -89,6 +107,9 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
     if (!this.bot || this.chatId === undefined) {
       throw new Error("TelegramChannel.send: no chat yet (no inbound message)");
     }
+    logger.debug(
+      `send: posting ${text.length} chars${opts?.replyTo ? ` (reply to ${opts.replyTo})` : ""}`,
+    );
     await this.bot.api.sendMessage({
       chat_id: this.chatId,
       text,
@@ -99,6 +120,9 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
   }
 
   async setAvailability(_status: AvailabilityStatus): Promise<void> {
+    logger.debug(
+      `setAvailability: ${_status} (no-op, Telegram has no bot presence)`,
+    );
     // ponytail: Telegram Bot API exposes no bot presence concept — no-op.
   }
 
@@ -115,7 +139,11 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
   }
 
   protected async teardownClient(): Promise<void> {
-    if (!this.bot) return;
+    if (!this.bot) {
+      logger.debug(`teardownClient: no bot, nothing to stop`);
+      return;
+    }
+    logger.debug(`teardownClient: stopping telegram bot`);
     await this.bot.stop(1000);
     this.bot = undefined;
   }

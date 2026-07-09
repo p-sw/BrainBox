@@ -19,10 +19,16 @@ import "./daemon/restartCommand";
 
 export async function startChannels(): Promise<number> {
   const items = await brainManager.listAvailableBrain();
+  logger.debug(`startChannels: ${items.length} candidate(s)`);
   let started = 0;
   for (const item of items) {
     const brain = await Brain.load(item.brainId);
-    if (!brain) continue;
+    if (!brain) {
+      logger.debug(
+        `startChannels: skip ${item.brainId} (Brain.load returned null)`,
+      );
+      continue;
+    }
     try {
       if (item.channel === "discord") {
         const channel = new DiscordChannel(brain as Brain<BrainItemDiscord>);
@@ -38,6 +44,10 @@ export async function startChannels(): Promise<number> {
           `Telegram channel started: ${brain.brainbase.displayName}`,
         );
         started += 1;
+      } else {
+        logger.debug(
+          `startChannels: unknown channel type "${(item as { channel: string }).channel}" for ${(item as { brainId: string }).brainId}`,
+        );
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -46,10 +56,12 @@ export async function startChannels(): Promise<number> {
       );
     }
   }
+  logger.debug(`startChannels: ${started}/${items.length} started`);
   return started;
 }
 
 export async function daemon(): Promise<void> {
+  logger.debug(`daemon: boot`);
   const started = await startChannels();
   if (started === 0) {
     logger.info("No activated brains with channels. Daemon idling.");
@@ -60,6 +72,7 @@ export async function daemon(): Promise<void> {
 const SOCKET_PATH = DAEMON_SOCKET_PATH;
 
 async function listenOnSocket(): Promise<void> {
+  logger.debug(`listenOnSocket: unlinking stale socket at ${SOCKET_PATH}`);
   try {
     unlinkSync(SOCKET_PATH);
   } catch {
@@ -68,8 +81,12 @@ async function listenOnSocket(): Promise<void> {
 
   const sockets = new Set<Socket>();
   const server = createServer((conn) => {
+    logger.debug(`listenOnSocket: new connection`);
     sockets.add(conn);
-    conn.on("close", () => sockets.delete(conn));
+    conn.on("close", () => {
+      logger.debug(`listenOnSocket: connection closed`);
+      sockets.delete(conn);
+    });
     handleConnection(conn);
   });
 
@@ -91,6 +108,7 @@ async function listenOnSocket(): Promise<void> {
 
   await new Promise<void>((resolve) => {
     const shutdown = () => {
+      logger.debug(`listenOnSocket: shutdown signal received`);
       for (const s of sockets) s.destroy();
       server.close(() => {
         try {
@@ -117,6 +135,7 @@ function handleConnection(conn: Socket): void {
       const line = buf.slice(0, idx).trim();
       buf = buf.slice(idx + 1);
       if (line.length === 0) continue;
+      logger.debug(`handleConnection: received line (${line.length} chars)`);
       void handleLine(conn, line);
     }
   });
@@ -130,9 +149,12 @@ async function handleLine(conn: Socket, line: string): Promise<void> {
   try {
     payload = JSON.parse(line);
   } catch {
+    logger.debug(`handleLine: invalid json, replying with error`);
     conn.write(JSON.stringify({ ok: false, error: "invalid json" }) + "\n");
     return;
   }
+  const cmd = (payload as { command?: string }).command;
+  logger.debug(`handleLine: dispatching command="${cmd ?? "?"}"`);
   const response = await dispatch(payload);
   conn.write(JSON.stringify(response) + "\n");
 }

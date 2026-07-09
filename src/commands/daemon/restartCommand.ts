@@ -8,6 +8,7 @@ defineCommand({
   handler: async () => {
     const before = BaseChannel.all().length;
     logger.info(`Restart: shutting down ${before} active channel(s)`);
+    logger.debug(`restart handler: tearing down ${before} active channel(s)`);
     await BaseChannel.shutdownAll();
     const started = await startChannels();
     logger.success(`Restart: ${started} channel(s) back up`);
