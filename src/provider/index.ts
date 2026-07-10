@@ -12,7 +12,7 @@ export {
 } from "./llm";
 
 import { LLMExecutor } from "./llm";
-import { OpenRouterExecutor } from "./openrouter";
+import { OpenRouterExecutor } from "./providers/openrouter";
 
 LLMExecutor.registerProvider({
   name: "openrouter",

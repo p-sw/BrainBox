@@ -15,7 +15,7 @@ import {
   type ChatWithToolsOptions,
   type ReasoningEffort,
   type ToolCall,
-} from "./llm";
+} from "../llm";
 
 const log = logger.child("llm:openrouter");
 
