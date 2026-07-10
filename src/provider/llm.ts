@@ -60,7 +60,35 @@ export type ProviderCtor = new (opts: {
   apiKey: string;
   conversationModel: string;
   identityModel: string;
+  // ponytail: per-provider knobs (region, project, deployment, endpoint) come
+  // from the auth record and are forwarded as-is. Concrete providers read the
+  // fields they need; new providers don't require editing this signature.
+  auth?: Record<string, unknown>;
 }) => LLMExecutor;
+
+export function defaultReasoningEffort(
+  effort: ReasoningEffort | undefined,
+  model: string,
+  identityModel: string,
+): ReasoningEffort {
+  if (effort) return effort;
+  return model === identityModel ? "medium" : "none";
+}
+
+export function readAuthString(
+  auth: Record<string, unknown> | undefined,
+  key: string,
+  envName?: string,
+): string {
+  const fromAuth =
+    typeof auth?.[key] === "string" ? (auth[key] as string) : undefined;
+  if (fromAuth) return fromAuth;
+  if (envName) {
+    const fromEnv = process.env[envName];
+    if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
+  }
+  return "";
+}
 
 export abstract class LLMExecutor {
   abstract readonly providerName: string;
@@ -95,7 +123,9 @@ export abstract class LLMExecutor {
     const parseSlot = (slot: string): { provider: string; model: string } => {
       const slash = slot.indexOf("/");
       if (slash < 0) {
-        log.error(`init: model slot "${slot}" must be in "provider/model" form`);
+        log.error(
+          `init: model slot "${slot}" must be in "provider/model" form`,
+        );
         process.exit(1);
       }
       return { provider: slot.slice(0, slash), model: slot.slice(slash + 1) };
@@ -104,10 +134,15 @@ export abstract class LLMExecutor {
     const id = parseSlot(identityModel);
     const build = (providerName: string): LLMExecutor => {
       const ctor = LLMExecutor.lookup(providerName);
+      const providerAuth = (auth[providerName] ?? {}) as Record<
+        string,
+        unknown
+      >;
       return new ctor({
-        apiKey: auth[providerName]?.apiKey ?? "",
+        apiKey: (providerAuth["apiKey"] as string) ?? "",
         conversationModel: conv.model,
         identityModel: id.model,
+        auth: providerAuth,
       });
     };
 
