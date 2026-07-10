@@ -52,16 +52,26 @@ export async function deactivateBrain(brainId: string): Promise<void> {
 export async function createBrain(
   displayName: string,
   seed: string,
+  options: { schedule: boolean },
 ): Promise<void> {
-  logger.debug(`createBrain: name="${displayName}" seed length=${seed.length}`);
+  logger.debug(
+    `createBrain: name="${displayName}" seed length=${seed.length} schedule=${options.schedule}`,
+  );
   const result = await Brain.create(displayName, seed);
   if (!result) {
     process.exitCode = 1;
     return;
   }
-  logger.success(
-    `Created brain "${displayName}" (${chalk.cyan(result.brainId)})`,
-  );
+  if (options.schedule) {
+    await result.brain.regenerateSchedules();
+    logger.success(
+      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) with initial schedule`,
+    );
+  } else {
+    logger.success(
+      `Created brain "${displayName}" (${chalk.cyan(result.brainId)})`,
+    );
+  }
 }
 
 export async function removeBrain(brainId: string): Promise<void> {
@@ -91,6 +101,7 @@ export function register(program: Command): Command {
   cmd
     .command("create <name> [seed]")
     .description("Create a new brain from a free-form seed")
+    .option("--no-schedule", "Skip generating the initial schedule")
     .action(createBrain);
   cmd
     .command("remove <brainId>")

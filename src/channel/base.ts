@@ -1,4 +1,4 @@
-import type { Brain } from "@/brain";
+import { Brain } from "@/brain";
 import type { BrainItemWithChannel } from "@/brain/manager";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 import type { AvailabilityStatus } from "@/provider/schema";
@@ -77,7 +77,9 @@ export abstract class BaseChannel<
           `daily-journal:${dateKey}`,
         );
         if (existing) {
-          logger.debug(`sleepMemory cron: skip — journal for ${dateKey} exists`);
+          logger.debug(
+            `sleepMemory cron: skip — journal for ${dateKey} exists`,
+          );
           return;
         }
         const history = await this.getMessageHistoryBetween(
@@ -108,22 +110,7 @@ export abstract class BaseChannel<
     logger.debug(
       `regenerateSchedules: tick for ${this.brain.brainbase.displayName}`,
     );
-    const today = new Date();
-    const tomorrow = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate() + 1,
-    );
-    await this.brain.createDailySchedule(tomorrow);
-    await this.brain.createDailySchedule(today);
-
-    // merging monthly schedule with daily schedule, so it can keep check on missed monthly schedule generation
-    const nextMonth = new Date(
-      today.getFullYear(),
-      today.getMonth() + 1,
-      today.getDate(),
-    );
-    await this.brain.createMonthlySchedule(nextMonth);
+    await this.brain.regenerateSchedules();
     logger.debug(`regenerateSchedules: done`);
   }
 
@@ -192,7 +179,9 @@ export abstract class BaseChannel<
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         catch: (e) => {
           logger.error(`Error while running cron ${name}: ${e}`);
-          logger.debug(`Cron ${name} stack: ${e instanceof Error ? e.stack : "(no stack)"}`);
+          logger.debug(
+            `Cron ${name} stack: ${e instanceof Error ? e.stack : "(no stack)"}`,
+          );
         },
       },
       callback,
@@ -420,9 +409,7 @@ export abstract class BaseChannel<
    * client/bot teardown to the subclass via {@link teardownClient}.
    */
   async shutdown(): Promise<void> {
-    logger.debug(
-      `shutdown: tearing down ${this.brain.brainbase.displayName}`,
-    );
+    logger.debug(`shutdown: tearing down ${this.brain.brainbase.displayName}`);
     this.stopOwnCrons();
     this.clearTimers();
     this.unregisterActive();

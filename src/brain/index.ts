@@ -44,7 +44,7 @@ export interface BrainCreateResult {
   baseSystemPrompt: string;
 }
 
-export class Brain<BB extends BrainItem = BrainItemWithChannel> {
+export class Brain<BB extends BrainItem = BrainItem> {
   private availabilityCache: Map<string, AvailabilityWindows> = new Map();
 
   constructor(
@@ -158,6 +158,23 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
     }
   }
 
+  async regenerateSchedules(): Promise<void> {
+    const today = new Date();
+    const tomorrow = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() + 1,
+    );
+    await this.createDailySchedule(tomorrow);
+    await this.createDailySchedule(today);
+    const nextMonth = new Date(
+      today.getFullYear(),
+      today.getMonth() + 1,
+      today.getDate(),
+    );
+    await this.createMonthlySchedule(nextMonth);
+  }
+
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
     const year =
       datetime.getMonth() === 11
@@ -201,7 +218,9 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
           );
         } catch {
           twoMonthsAgoSchedule = null;
-          log.debug(`createMonthlySchedule: prior schedule malformed, ignoring`);
+          log.debug(
+            `createMonthlySchedule: prior schedule malformed, ignoring`,
+          );
         }
       }
 
@@ -685,7 +704,9 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
       const monthKey = formatMonthKey(target);
       const stored = await this.memory.get(`monthly-schedule:${monthKey}`);
       if (!stored) {
-        log.debug(`getMonthlySummaryForDay: no monthly schedule for ${monthKey}`);
+        log.debug(
+          `getMonthlySummaryForDay: no monthly schedule for ${monthKey}`,
+        );
         return null;
       }
 
@@ -724,7 +745,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
   static async create(
     displayName: string,
     seed: string,
-  ): Promise<{ brainId: string } | null> {
+  ): Promise<{ brainId: string; brain: Brain } | null> {
     log.debug(`Brain.create: starting name="${displayName}"`);
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
@@ -790,7 +811,7 @@ export class Brain<BB extends BrainItem = BrainItemWithChannel> {
 
       await brainManager.saveBrain(brainId, brainbase);
       log.debug(`Brain.create: brainbase saved (id=${brainId})`);
-      return { brainId };
+      return { brainId, brain: new Brain(db, space, brainbase, memory) };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to create brain "${displayName}": ${reason}`);
@@ -903,9 +924,10 @@ function parseSearchArguments(json: string): string | null {
   return null;
 }
 
-function stripAssistantForHistory(
-  message: { content?: string; toolCalls?: ChatAssistantMessage["toolCalls"] },
-): ChatAssistantMessage {
+function stripAssistantForHistory(message: {
+  content?: string;
+  toolCalls?: ChatAssistantMessage["toolCalls"];
+}): ChatAssistantMessage {
   return {
     role: "assistant",
     content: message.content,
