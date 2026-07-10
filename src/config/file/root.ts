@@ -27,4 +27,11 @@ export function setModelSlot(slot: ModelSlot, value: string): RootConfig {
   return rootCfg.update((root) => ({ ...root, [SLOT_KEY[slot]]: value }));
 }
 
+export function setSupermemoryKey(key: string): RootConfig {
+  return rootCfg.update((root) => ({
+    ...root,
+    supermemory: { ...root.supermemory, apiKey: key },
+  }));
+}
+
 export default rootCfg.read();

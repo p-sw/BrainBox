@@ -11,6 +11,7 @@ import { register as pairing } from "@/commands/pairing";
 import { register as restart } from "@/commands/restart";
 import { register as auth } from "@/commands/auth";
 import { register as model } from "@/commands/model";
+import { register as onboard } from "@/commands/onboard";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -50,6 +51,7 @@ pairing(program);
 restart(program);
 auth(program);
 model(program);
+onboard(program);
 
 program.on("command:*", () => {
   logger.error(`Unknown command: ${program.args.join(" ")}`);

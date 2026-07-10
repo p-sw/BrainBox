@@ -28,9 +28,13 @@ Then she runs on a Discord or Telegram account. She greets you. She replies when
 bun install
 ```
 
-**2. Set up your keys**
+**2. Onboard** (one-time interactive setup)
 
-Put your LLM provider key and Discord/Telegram bot token in your environment. See `src/config/` for what's read.
+```
+brainbox onboard
+```
+
+Walks you through provider+api key, default model, supermemory key, your first brain, and a channel binding. To set those up by hand instead, follow the steps below.
 
 **3. Create a persona**
 
@@ -94,6 +98,7 @@ A few things worth knowing about how she behaves:
 ### Commands at a glance
 
 ```
+brainbox onboard                               # one-time interactive setup
 brainbox brain list                            # show all brains and their state
 brainbox brain create <name> [seed]            # build a new persona
 brainbox brain remove <brainId>                # delete a brain and its memory
