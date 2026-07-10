@@ -107,6 +107,10 @@ export abstract class LLMExecutor {
     LLMExecutor.providers.push(p);
   }
 
+  static listProviderNames(): string[] {
+    return LLMExecutor.providers.map((p) => p.name);
+  }
+
   private static lookup(name: string): ProviderCtor {
     const entry = LLMExecutor.providers.find((p) => p.name === name);
     if (!entry) {
@@ -176,4 +180,12 @@ export abstract class LLMExecutor {
       }
     })();
   }
+}
+
+
+// ponytail: thin wrapper so callers can `import { listProviderNames }`
+// without going through the class — static class members aren't a top-level
+// binding under `verbatimModuleSyntax`.
+export function listProviderNames(): string[] {
+  return LLMExecutor.listProviderNames();
 }

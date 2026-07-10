@@ -2,6 +2,7 @@ export {
   LLMExecutor,
   defaultReasoningEffort,
   readAuthString,
+  listProviderNames,
   type CallOptions,
   type ChatAssistantMessage,
   type ChatChoice,

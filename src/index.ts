@@ -9,6 +9,8 @@ import { register as daemon } from "@/commands/daemon";
 import { register as brain } from "@/commands/brain";
 import { register as pairing } from "@/commands/pairing";
 import { register as restart } from "@/commands/restart";
+import { register as auth } from "@/commands/auth";
+import { register as model } from "@/commands/model";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -42,11 +44,12 @@ program
   .configureOutput({
     outputError: (str) => logger.error(str.replace("error: ", "")),
   });
-
 daemon(program);
 brain(program);
 pairing(program);
 restart(program);
+auth(program);
+model(program);
 
 program.on("command:*", () => {
   logger.error(`Unknown command: ${program.args.join(" ")}`);

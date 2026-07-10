@@ -18,12 +18,15 @@
   },
   "dependencies": {
     "@openrouter/sdk": "^0.12.79",
+    "@types/react": "^19.2.17",
     "chalk": "^5.6.2",
     "commander": "^15.0.0",
     "croner": "^10.0.1",
     "discord.js": "^14.26.4",
     "gramio": "^0.12.0",
+    "ink": "^7.1.0",
     "prettier": "^3.8.3",
+    "react": "^19.2.7",
     "supermemory": "^4.24.12",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
