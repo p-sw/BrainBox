@@ -1,5 +1,5 @@
 import z from "zod";
-import { parseConfigFile } from "../loader";
+import { configFile } from "../loader";
 
 // ponytail: provider-specific knobs (region, project, deployment, endpoint, account)
 // live alongside apiKey in the same record. .loose() lets each provider add fields
@@ -51,18 +51,55 @@ import { parseConfigFile } from "../loader";
 //   vertex            apiKey (OAuth access token, GOOGLE_ACCESS_TOKEN) + project (GOOGLE_CLOUD_PROJECT) + region (GOOGLE_CLOUD_REGION)
 //   copilot           apiKey (pre-exchanged Copilot session token)
 //   gitlab-duo        apiKey (GitLab PAT) + baseURL (GITLAB_BASE_URL)
-//   snowflake-cortex  apiKey (programmatic access token / JWT) + account (SNOWFLAKE_ACCOUNT)
+export type AuthRecord = Record<string, string>;
+export type AuthFile = Record<string, AuthRecord>;
 
-const ProviderAuthSchema = z
-  .object({
-    apiKey: z.string().default(""),
-  })
-  .loose();
+// ponytail: .loose() lets each provider add fields (region, project, deployment,
+// endpoint, account) without us enumerating them in the schema. Writers only
+// touch string values, so we cast to z.ZodType<AuthFile> to keep the public
+// type tight while the YAML round-trip stays permissive.
+const AuthSchema = z.record(
+  z.string(),
+  z.object({ apiKey: z.string().default("") }).loose(),
+) as z.ZodType<AuthFile>;
 
-const AuthSchema = z.record(z.string(), ProviderAuthSchema);
+const authCfg = configFile<AuthFile>("auth.yaml", { schema: AuthSchema });
 
-const authConfig = parseConfigFile("auth.yaml", {
-  schema: AuthSchema,
-});
+// ponytail: providers freely add apiKey + extras. .loose() on the schema keeps
+// the writer provider-agnostic — unknown fields round-trip through YAML as-is.
+export const PROVIDER_EXTRA_FIELDS: Record<string, string[]> = {
+  "cloudflare-gateway": ["accountId", "gatewayId"],
+  "cloudflare-workers": ["accountId"],
+  "sap-aicore": ["baseURL"],
+  "azure-openai": ["resource", "apiVersion"],
+  "azure-cognitive": ["resource", "apiVersion"],
+  anthropic: ["baseURL", "apiVersion"],
+  bedrock: ["region", "sessionToken"],
+  vertex: ["project", "region"],
+  "gitlab-duo": ["baseURL"],
+  "snowflake-cortex": ["account"],
+};
 
-export default authConfig;
+export function readAuthFile(): AuthFile {
+  return authCfg.read();
+}
+
+export function setProviderAuth(
+  provider: string,
+  fields: AuthRecord,
+): AuthFile {
+  return authCfg.update((auth) => ({
+    ...auth,
+    [provider]: { ...(auth[provider] ?? {}), ...fields },
+  }));
+}
+
+export function removeProviderAuth(provider: string): AuthFile {
+  return authCfg.update((auth) => {
+    const next = { ...auth };
+    delete next[provider];
+    return next;
+  });
+}
+
+export default authCfg.read();

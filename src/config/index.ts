@@ -1,6 +1,6 @@
 import { brainboxRoot } from "./loader";
-import rootConfig from "./loaded/root";
-import authConfig from "./loaded/auth";
+import rootConfig from "./file/root";
+import authConfig from "./file/auth";
 
 export interface Config {
   debug: boolean;
