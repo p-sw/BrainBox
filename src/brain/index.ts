@@ -24,7 +24,7 @@ import type {
   ChatChoice,
   ChatFunctionTool,
   ChatMessages,
-} from "@openrouter/sdk/models";
+} from "@/provider";
 import {
   brainManager,
   type BrainItem,
@@ -847,39 +847,33 @@ function formatDatetime(now: Date): string {
 function buildSendMessageTools(): ChatFunctionTool[] {
   return [
     {
-      type: "function",
-      function: {
-        name: "addReplyMessage",
-        description:
-          "Append one chat bubble to the reply stream. Call once per bubble you want to send. Do not call when you are done — just return text without tool calls.",
-        parameters: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            content: { type: "string", description: "The bubble text." },
-          },
-          required: ["content"],
+      name: "addReplyMessage",
+      description:
+        "Append one chat bubble to the reply stream. Call once per bubble you want to send. Do not call when you are done — just return text without tool calls.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          content: { type: "string", description: "The bubble text." },
         },
+        required: ["content"],
       },
     },
     {
-      type: "function",
-      function: {
-        name: "searchMemory",
-        description:
-          "Semantic search over the long-term memory of facts about the persona and the user. Returns the most relevant stored content for a natural-language query.",
-        parameters: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            query: {
-              type: "string",
-              description:
-                "Natural-language query describing the fact you want to recall.",
-            },
+      name: "searchMemory",
+      description:
+        "Semantic search over the long-term memory of facts about the persona and the user. Returns the most relevant stored content for a natural-language query.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          query: {
+            type: "string",
+            description:
+              "Natural-language query describing the fact you want to recall.",
           },
-          required: ["query"],
         },
+        required: ["query"],
       },
     },
   ];
@@ -910,11 +904,11 @@ function parseSearchArguments(json: string): string | null {
 }
 
 function stripAssistantForHistory(
-  message: ChatAssistantMessage,
+  message: { content?: string; toolCalls?: ChatAssistantMessage["toolCalls"] },
 ): ChatAssistantMessage {
   return {
     role: "assistant",
-    content: message.content ?? null,
+    content: message.content,
     toolCalls: message.toolCalls,
   };
 }
