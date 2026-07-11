@@ -7,8 +7,8 @@ export class MiniMaxExecutor extends OpenAICompatibleExecutor {
     identityModel: string;
   }) {
     super({
-      providerName: "MiniMax",
-      baseURL: "https://api.MiniMax.chat/v1",
+      providerName: "minimax",
+      baseURL: "https://api.minimax.chat/v1",
       apiKey: opts.apiKey,
       conversationModel: opts.conversationModel,
       identityModel: opts.identityModel,
