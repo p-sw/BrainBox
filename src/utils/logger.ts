@@ -1,5 +1,11 @@
 import chalk, { type ChalkInstance } from "chalk";
-import { existsSync, mkdirSync, createWriteStream, type WriteStream } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  createWriteStream,
+  writeFileSync,
+  type WriteStream,
+} from "fs";
 import { join } from "path";
 
 export type LogLevel =
@@ -111,6 +117,8 @@ const shared = {
 };
 
 const mainSink = new DailyFileSink();
+// File-only LLM exchanges — one file per request, never console.
+let llmLogDir: string | undefined;
 
 function applyShared(options: Partial<LoggerOptions>): void {
   if (options.level !== undefined) shared.level = options.level;
@@ -224,6 +232,7 @@ class Logger {
 
   close() {
     mainSink.close();
+    llmLogDir = undefined;
   }
 }
 
@@ -231,6 +240,40 @@ export const logger = new Logger();
 
 export function createLogger(options: LoggerOptions): Logger {
   return new Logger(options);
+}
+
+/** Enable/disable the file-only per-request LLM log directory. */
+export function configureLlmLog(logDir: string | undefined): void {
+  llmLogDir = logDir;
+  if (logDir && !existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+}
+
+export function isLlmLogEnabled(): boolean {
+  return llmLogDir !== undefined;
+}
+
+function sanitizeCaller(caller: string): string {
+  const s = caller.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return s.length > 0 ? s : "unknown";
+}
+
+function dateTimeKey(d: Date = new Date()): string {
+  return `${dateKey(d)}-${pad2(d.getHours())}-${pad2(d.getMinutes())}-${pad2(d.getSeconds())}`;
+}
+
+/**
+ * Write one LLM exchange to
+ * `<logDir>/YYYY-MM-DD-hh-mm-ss-<callerName>.log`. Never console.
+ */
+export function writeLlmExchange(caller: string, content: string): void {
+  if (!llmLogDir) return;
+  if (!existsSync(llmLogDir)) mkdirSync(llmLogDir, { recursive: true });
+  const base = `${dateTimeKey()}-${sanitizeCaller(caller)}`;
+  let path = join(llmLogDir, `${base}.log`);
+  for (let n = 2; existsSync(path); n += 1) {
+    path = join(llmLogDir, `${base}-${n}.log`);
+  }
+  writeFileSync(path, content, "utf8");
 }
 
 export type { Logger };

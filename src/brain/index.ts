@@ -127,6 +127,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
       log.debug(`createDailySchedule: calling identity model`);
       const schedule = await llm.call<DailySchedule>(llm.models.identity, {
+        caller: "daily-schedule",
         instruction,
         message: promptMessage,
         jsonSchemaName: "daily-schedule",
@@ -245,6 +246,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
       log.debug(`createMonthlySchedule: calling identity model`);
       const schedule = await llm.call<MonthlySchedule>(llm.models.identity, {
+        caller: "monthly-schedule",
         instruction,
         message: promptMessage,
         jsonSchemaName: "monthly-schedule",
@@ -298,6 +300,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
       log.debug(`sleepMemory: calling identity model`);
       const memoir = await llm.call<string>(llm.models.identity, {
+        caller: "sleep-memory",
         instruction,
         message: promptMessage,
       });
@@ -428,6 +431,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       });
 
       const result = await llm.call<AvailabilityWindows>(llm.models.identity, {
+        caller: "availability",
         instruction,
         message: promptMessage,
         jsonSchemaName: "availability",
@@ -534,6 +538,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       let choice: ChatChoice;
       try {
         choice = await llm.chatWithTools(llm.models.conversation, {
+          caller: initiate ? "start-conversation" : "send-message",
           instruction: `${this.brainbase.baseSystemPrompt}\n\n${instruction}`,
           messages,
           tools,
@@ -755,6 +760,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
       log.debug(`Brain.create: generating description`);
       const description = await llm.call<string>(llm.models.identity, {
+        caller: "persona-init",
         instruction: personaInitInstruction,
         message: seed,
       });
@@ -769,6 +775,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       const generated = await llm.call<BaseSystemPromptGeneration>(
         llm.models.identity,
         {
+          caller: "base-system-prompt",
           instruction: personaSystemInstruction,
           message: description,
           jsonSchemaName: "base-system-prompt",

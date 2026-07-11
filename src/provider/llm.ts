@@ -1,5 +1,5 @@
 import { config } from "@/config";
-import { logger } from "@/utils/logger";
+import { logger, isLlmLogEnabled, writeLlmExchange } from "@/utils/logger";
 
 const log = logger.child("llm");
 
@@ -40,6 +40,8 @@ export type ReasoningEffort = "none" | "low" | "medium" | "high";
 export type CallOptions = {
   instruction: string;
   message: string;
+  /** Log file label: `YYYY-MM-DD-hh-mm-ss-<caller>.log` */
+  caller?: string;
   reasoningEffort?: ReasoningEffort;
 } & (
   | { jsonSchemaName: string; jsonSchema: Record<string, unknown> | undefined }
@@ -50,6 +52,8 @@ export type ChatWithToolsOptions = {
   instruction: string;
   messages: ChatMessages[];
   tools: ChatFunctionTool[];
+  /** Log file label: `YYYY-MM-DD-hh-mm-ss-<caller>.log` */
+  caller?: string;
   reasoningEffort?: ReasoningEffort;
   parallelToolCalls?: boolean;
 };
@@ -172,7 +176,7 @@ export abstract class LLMExecutor {
     };
 
     if (conv.provider === id.provider) {
-      return build(conv.provider);
+      return withLlmLogging(build(conv.provider));
     }
 
     const modelToProvider: Record<string, string> = {
@@ -185,22 +189,165 @@ export abstract class LLMExecutor {
     };
     const fallback = instances[conv.provider]!;
 
-    return new (class extends LLMExecutor {
-      readonly providerName = "dispatch";
-      readonly models = {
-        conversation: conv.model,
-        identity: id.model,
-      };
-      call<T>(model: string, options: CallOptions): Promise<T> {
-        const exec = instances[modelToProvider[model] ?? ""] ?? fallback;
-        return exec.call<T>(model, options);
-      }
-      chatWithTools(model: string, options: ChatWithToolsOptions) {
-        const exec = instances[modelToProvider[model] ?? ""] ?? fallback;
-        return exec.chatWithTools(model, options);
-      }
-    })();
+    return withLlmLogging(
+      new (class extends LLMExecutor {
+        readonly providerName = "dispatch";
+        readonly models = {
+          conversation: conv.model,
+          identity: id.model,
+        };
+        call<T>(model: string, options: CallOptions): Promise<T> {
+          const exec = instances[modelToProvider[model] ?? ""] ?? fallback;
+          return exec.call<T>(model, options);
+        }
+        chatWithTools(model: string, options: ChatWithToolsOptions) {
+          const exec = instances[modelToProvider[model] ?? ""] ?? fallback;
+          return exec.chatWithTools(model, options);
+        }
+      })(),
+    );
   }
+}
+
+function formatPayload(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function resolveCaller(
+  options: { caller?: string; jsonSchemaName?: string },
+  fallback: string,
+): string {
+  return options.caller ?? options.jsonSchemaName ?? fallback;
+}
+
+function withLlmLogging(inner: LLMExecutor): LLMExecutor {
+  return new (class extends LLMExecutor {
+    readonly providerName = inner.providerName;
+    readonly models = inner.models;
+
+    async call<T>(model: string, options: CallOptions): Promise<T> {
+      const jsonMode = "jsonSchemaName" in options;
+      const caller = resolveCaller(
+        {
+          caller: options.caller,
+          jsonSchemaName: jsonMode ? options.jsonSchemaName : undefined,
+        },
+        "call",
+      );
+      const requestBody = [
+        `provider: ${inner.providerName}`,
+        `model: ${model}`,
+        `caller: ${caller}`,
+        `reasoningEffort: ${options.reasoningEffort ?? "-"}`,
+        `jsonSchemaName: ${jsonMode ? options.jsonSchemaName : "-"}`,
+        "",
+        "--- instruction ---",
+        options.instruction,
+        "",
+        "--- message ---",
+        options.message,
+        ...(jsonMode
+          ? ["", "--- jsonSchema ---", formatPayload(options.jsonSchema)]
+          : []),
+      ].join("\n");
+
+      try {
+        const result = await inner.call<T>(model, options);
+        if (isLlmLogEnabled()) {
+          writeLlmExchange(
+            caller,
+            [
+              "======== REQUEST ========",
+              requestBody,
+              "",
+              "======== RESPONSE ========",
+              formatPayload(result),
+              "",
+            ].join("\n"),
+          );
+        }
+        return result;
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        if (isLlmLogEnabled()) {
+          writeLlmExchange(
+            caller,
+            [
+              "======== REQUEST ========",
+              requestBody,
+              "",
+              "======== ERROR ========",
+              reason,
+              "",
+            ].join("\n"),
+          );
+        }
+        throw err;
+      }
+    }
+
+    async chatWithTools(
+      model: string,
+      options: ChatWithToolsOptions,
+    ): Promise<ChatChoice> {
+      const caller = resolveCaller(options, "chat");
+      const requestBody = [
+        `provider: ${inner.providerName}`,
+        `model: ${model}`,
+        `caller: ${caller}`,
+        `reasoningEffort: ${options.reasoningEffort ?? "-"}`,
+        `parallelToolCalls: ${options.parallelToolCalls ?? false}`,
+        "",
+        "--- instruction ---",
+        options.instruction,
+        "",
+        "--- messages ---",
+        formatPayload(options.messages),
+        "",
+        "--- tools ---",
+        formatPayload(options.tools),
+      ].join("\n");
+
+      try {
+        const result = await inner.chatWithTools(model, options);
+        if (isLlmLogEnabled()) {
+          writeLlmExchange(
+            caller,
+            [
+              "======== REQUEST ========",
+              requestBody,
+              "",
+              "======== RESPONSE ========",
+              formatPayload(result),
+              "",
+            ].join("\n"),
+          );
+        }
+        return result;
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        if (isLlmLogEnabled()) {
+          writeLlmExchange(
+            caller,
+            [
+              "======== REQUEST ========",
+              requestBody,
+              "",
+              "======== ERROR ========",
+              reason,
+              "",
+            ].join("\n"),
+          );
+        }
+        throw err;
+      }
+    }
+  })();
 }
 
 
