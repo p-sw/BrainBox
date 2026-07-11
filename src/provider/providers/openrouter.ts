@@ -8,6 +8,7 @@ import type {
 } from "@openrouter/sdk/models";
 import {
   LLMExecutor,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -52,7 +53,10 @@ function fromOrChoice(choice: OrChoice): ChatChoice {
   }));
   return {
     message: {
-      content: typeof msg.content === "string" ? msg.content : undefined,
+      content:
+        typeof msg.content === "string"
+          ? stripThinkTags(msg.content)
+          : undefined,
       toolCalls,
     },
   };
@@ -121,7 +125,8 @@ export class OpenRouterExecutor extends LLMExecutor {
       },
     });
 
-    const content = result.choices[0]?.message?.content;
+    const raw = result.choices[0]?.message?.content;
+    const content = typeof raw === "string" ? stripThinkTags(raw) : raw;
     if (!content) {
       log.debug(`call: empty content in choice 0`);
       throw new Error("Empty response from model");

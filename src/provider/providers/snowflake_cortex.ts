@@ -4,6 +4,7 @@ import {
   LLMExecutor,
   defaultReasoningEffort,
   readAuthString,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -159,7 +160,9 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
         `snowflake-cortex API error: ${data.error.message ?? "unknown"}`,
       );
     }
-    const content = data.choices?.[0]?.message?.content ?? data.message ?? "";
+    const content = stripThinkTags(
+      data.choices?.[0]?.message?.content ?? data.message ?? "",
+    );
     if (!content) {
       throw new Error("Empty response from model");
     }
@@ -189,7 +192,9 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
       );
     }
     const choice = data.choices?.[0];
-    const content = choice?.message?.content ?? data.message ?? "";
+    const content = stripThinkTags(
+      choice?.message?.content ?? data.message ?? "",
+    );
     const toolCalls: ToolCall[] | undefined = choice?.message?.tool_calls?.map(
       (c) => ({
         id: c.id,

@@ -3,6 +3,7 @@ import {
   LLMExecutor,
   defaultReasoningEffort,
   readAuthString,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatMessages,
@@ -119,7 +120,7 @@ export class CloudflareWorkersExecutor extends LLMExecutor {
         `cloudflare-workers API error: ${data.errors.map((e) => e.message).join("; ")}`,
       );
     }
-    const content = data.result?.response ?? "";
+    const content = stripThinkTags(data.result?.response ?? "");
     if (!content) {
       throw new Error("Empty response from model");
     }
@@ -160,7 +161,7 @@ export class CloudflareWorkersExecutor extends LLMExecutor {
         `cloudflare-workers API error: ${data.errors.map((e) => e.message).join("; ")}`,
       );
     }
-    const content = data.result?.response ?? "";
+    const content = stripThinkTags(data.result?.response ?? "");
     const toolCalls: ToolCall[] | undefined = data.result?.tool_calls?.map(
       (c, idx) => ({
         id: `call_${idx}`,

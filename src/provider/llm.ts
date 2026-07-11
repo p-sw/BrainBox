@@ -75,6 +75,15 @@ export function defaultReasoningEffort(
   return model === identityModel ? "medium" : "none";
 }
 
+// Some models embed CoT as <think>…</think> inside content, or wrap JSON in
+// ``` fences. Strip before JSON.parse / persona text.
+export function stripThinkTags(content: string): string {
+  let s = content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "").trim();
+  const fence = s.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  if (fence?.[1]) s = fence[1].trim();
+  return s;
+}
+
 export function readAuthString(
   auth: Record<string, unknown> | undefined,
   key: string,

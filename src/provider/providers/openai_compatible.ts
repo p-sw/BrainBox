@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import {
   LLMExecutor,
   defaultReasoningEffort,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -12,12 +13,6 @@ import {
 } from "../llm";
 
 const log = logger.child("llm:openai-compatible");
-
-// MiniMax (and similar) may wrap chain-of-thought in <think>…</think> inside
-// content. Strip before JSON.parse / persona text so structured calls work.
-export function stripThinkTags(content: string): string {
-  return content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "").trim();
-}
 
 // ponytail: Most LLM providers expose an OpenAI-compatible /v1/chat/completions endpoint.
 // One executor, parameterized by baseURL + auth headers, covers the majority of the list.

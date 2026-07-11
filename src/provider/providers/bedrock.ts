@@ -3,6 +3,7 @@ import { createHmac, createHash } from "node:crypto";
 import {
   LLMExecutor,
   readAuthString,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -172,10 +173,12 @@ function extractAnthropicContent(data: BedrockResponse): {
   toolCalls: ToolCall[] | undefined;
 } {
   const content = (data["content"] as Array<Record<string, unknown>>) ?? [];
-  const text = content
-    .filter((b) => b["type"] === "text")
-    .map((b) => b["text"] as string)
-    .join("");
+  const text = stripThinkTags(
+    content
+      .filter((b) => b["type"] === "text")
+      .map((b) => b["text"] as string)
+      .join(""),
+  );
   const toolCalls: ToolCall[] | undefined = content
     .filter((b) => b["type"] === "tool_use")
     .map((b) => ({

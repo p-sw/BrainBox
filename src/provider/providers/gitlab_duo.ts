@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   LLMExecutor,
   readAuthString,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -138,7 +139,7 @@ export class GitLabDuoExecutor extends LLMExecutor {
         `gitlab-duo API error: ${data.error.message ?? "unknown"}`,
       );
     }
-    const content = data.choices?.[0]?.message?.content ?? "";
+    const content = stripThinkTags(data.choices?.[0]?.message?.content ?? "");
     if (!content) {
       throw new Error("Empty response from model");
     }
@@ -176,7 +177,9 @@ export class GitLabDuoExecutor extends LLMExecutor {
     );
     return {
       message: {
-        content: choice?.message?.content ?? undefined,
+        content: choice?.message?.content
+          ? stripThinkTags(choice.message.content)
+          : undefined,
         toolCalls,
       },
     };
