@@ -29,7 +29,9 @@ export class AzureOpenAIExecutor extends OpenAICompatibleExecutor {
     super({
       providerName: "azure-openai",
       baseURL: `https://${resource || "__resource__"}.openai.azure.com/openai/deployments`,
-      apiKey: opts.apiKey,
+      // Azure key auth wants api-key, not Authorization Bearer
+      apiKey: "",
+      defaultHeaders: { "api-key": opts.apiKey },
       conversationModel: opts.conversationModel,
       identityModel: opts.identityModel,
     });

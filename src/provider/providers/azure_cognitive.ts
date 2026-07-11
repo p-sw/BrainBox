@@ -16,7 +16,8 @@ export class AzureCognitiveExecutor extends OpenAICompatibleExecutor {
     super({
       providerName: "azure-cognitive",
       baseURL: `https://${resource || "__resource__"}.cognitiveservices.azure.com/openai/deployments`,
-      apiKey: opts.apiKey,
+      apiKey: "",
+      defaultHeaders: { "api-key": opts.apiKey },
       conversationModel: opts.conversationModel,
       identityModel: opts.identityModel,
     });
