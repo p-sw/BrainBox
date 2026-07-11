@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import path, { dirname } from "path";
 import { fileURLToPath } from "url";
@@ -25,7 +26,10 @@ function fileName(promptKey: PromptKey): string {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const PROMPTS_DIR = path.resolve(__dirname, "../../prompts");
+// dist bundle: dist/prompts; source: src/provider → ../../prompts
+const PROMPTS_DIR = existsSync(path.resolve(__dirname, "prompts"))
+  ? path.resolve(__dirname, "prompts")
+  : path.resolve(__dirname, "../../prompts");
 
 export async function loadPrompt(promptKey: PromptKey): Promise<string> {
   const filePath = path.join(PROMPTS_DIR, fileName(promptKey));

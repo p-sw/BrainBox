@@ -1,14 +1,17 @@
 {
   "name": "@p-sw/brainbox",
-  "version": "0.1.0",
-  "module": "src/index.ts",
+  "version": "0.1.1",
+  "module": "dist/index.js",
+  "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "brainbox": "./src/index.ts"
+    "brainbox": "./dist/index.js"
   },
   "scripts": {
     "cli": "bun run src/index.ts",
-    "format": "bun run prettier 'src/**/*.ts' -w"
+    "format": "bun run prettier 'src/**/*.ts' -w",
+    "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target node --packages external && cp -r prompts dist/prompts && chmod +x dist/index.js",
+    "publish": "bun run scripts/publish.ts"
   },
   "devDependencies": {
     "@types/node": "^25.9.1"
