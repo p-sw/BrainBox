@@ -63,9 +63,9 @@ export async function startChannels(): Promise<number> {
 }
 
 export async function daemon(): Promise<void> {
-  const logFile = join(config.brainboxRoot, "brainbox.log");
-  logger.configure({ file: logFile });
-  logger.debug(`daemon: boot (log=${logFile})`);
+  const logDir = join(config.brainboxRoot, "logs");
+  logger.configure({ logDir });
+  logger.debug(`daemon: boot (logDir=${logDir})`);
   const started = await startChannels();
   if (started === 0) {
     logger.info("No activated brains with channels. Daemon idling.");

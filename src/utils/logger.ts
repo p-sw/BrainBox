@@ -1,6 +1,6 @@
 import chalk, { type ChalkInstance } from "chalk";
 import { existsSync, mkdirSync, createWriteStream, type WriteStream } from "fs";
-import { dirname } from "path";
+import { join } from "path";
 
 export type LogLevel =
   | "debug"
@@ -40,12 +40,64 @@ export interface LoggerOptions {
   colors?: boolean;
   /** Tag prefix for all messages. Default: none */
   tag?: string;
-  /** File path to append logs to. Default: none */
-  file?: string;
+  /**
+   * Directory for daily log files named `YYYY-MM-DD.log`.
+   * A new file is opened when the local date rolls over. Default: none
+   */
+  logDir?: string;
   /** Write JSON lines to file instead of plain text. Default: false */
   json?: boolean;
   /** Completely suppress console output. Default: false */
   silent?: boolean;
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+function dateKey(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** Daily-rotated append-only file sink under `dir/YYYY-MM-DD.log`. */
+class DailyFileSink {
+  private dir: string | undefined;
+  private date: string | undefined;
+  private stream: WriteStream | undefined;
+
+  setDir(dir: string | undefined): void {
+    if (dir === this.dir) return;
+    this.stream?.end();
+    this.stream = undefined;
+    this.date = undefined;
+    this.dir = dir;
+    if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
+  }
+
+  write(data: string): void {
+    if (!this.dir) return;
+    const today = dateKey();
+    if (!this.stream || this.date !== today) {
+      this.stream?.end();
+      this.date = today;
+      if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
+      this.stream = createWriteStream(join(this.dir, `${today}.log`), {
+        flags: "a",
+      });
+    }
+    this.stream.write(data);
+  }
+
+  close(): void {
+    this.stream?.end();
+    this.stream = undefined;
+    this.date = undefined;
+    this.dir = undefined;
+  }
+
+  get enabled(): boolean {
+    return this.dir !== undefined;
+  }
 }
 
 // Process-wide sink: configure() and constructor options (except tag) apply to
@@ -54,24 +106,11 @@ const shared = {
   level: "info" as LogLevel,
   timestamps: true,
   colors: chalk.level > 0,
-  file: undefined as string | undefined,
-  fileStream: undefined as WriteStream | undefined,
   json: false,
   silent: false,
 };
 
-function openFile(path: string | undefined): void {
-  if (path === shared.file) return;
-  shared.fileStream?.end();
-  shared.file = path;
-  if (path) {
-    const dir = dirname(path);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    shared.fileStream = createWriteStream(path, { flags: "a" });
-  } else {
-    shared.fileStream = undefined;
-  }
-}
+const mainSink = new DailyFileSink();
 
 function applyShared(options: Partial<LoggerOptions>): void {
   if (options.level !== undefined) shared.level = options.level;
@@ -79,8 +118,8 @@ function applyShared(options: Partial<LoggerOptions>): void {
   if (options.colors !== undefined) shared.colors = options.colors;
   if (options.silent !== undefined) shared.silent = options.silent;
   if (options.json !== undefined) shared.json = options.json;
-  // `file: undefined` must clear the sink — use `in` so Partial can disable it.
-  if ("file" in options) openFile(options.file);
+  // `logDir: undefined` must clear the sink — use `in` so Partial can disable it.
+  if ("logDir" in options) mainSink.setDir(options.logDir);
 }
 
 class Logger {
@@ -97,8 +136,7 @@ class Logger {
 
   private formatTimestamp(): string {
     const now = new Date();
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())} ${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
   }
 
   private format(
@@ -149,8 +187,8 @@ class Logger {
       out.write(consoleLine + "\n");
     }
 
-    if (shared.fileStream) {
-      shared.fileStream.write(shared.json ? jsonLine : fileLine);
+    if (mainSink.enabled) {
+      mainSink.write(shared.json ? jsonLine : fileLine);
     }
   }
 
@@ -175,7 +213,7 @@ class Logger {
 
   child(tag: string): Logger {
     const combined = this.tag ? `${this.tag}:${tag}` : tag;
-    // Tag only — level/file/json live in shared and stay process-wide.
+    // Tag only — level/logDir/json live in shared and stay process-wide.
     return new Logger({ tag: combined });
   }
 
@@ -185,9 +223,7 @@ class Logger {
   }
 
   close() {
-    shared.fileStream?.end();
-    shared.fileStream = undefined;
-    shared.file = undefined;
+    mainSink.close();
   }
 }
 
