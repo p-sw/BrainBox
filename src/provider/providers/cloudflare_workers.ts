@@ -5,6 +5,8 @@ import {
   parseModelJson,
   readAuthString,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatMessages,
@@ -93,23 +95,26 @@ export class CloudflareWorkersExecutor extends LLMExecutor {
   private async run(
     model: string,
     body: Record<string, unknown>,
+    caller: string,
   ): Promise<CloudflareResponse> {
     const url = `${this.baseURL}/${encodeURIComponent(model)}`;
+    const requestRaw = JSON.stringify(body);
     const res = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: requestRaw,
     });
+    const responseRaw = await res.text().catch(() => "");
+    logLlmWire(caller, requestRaw, responseRaw);
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       throw new Error(
-        `cloudflare-workers request failed: ${res.status} ${res.statusText} body=${text.slice(0, 500)}`,
+        `cloudflare-workers request failed: ${res.status} ${res.statusText} body=${responseRaw.slice(0, 500)}`,
       );
     }
-    return (await res.json()) as CloudflareResponse;
+    return JSON.parse(responseRaw) as CloudflareResponse;
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
@@ -137,7 +142,7 @@ export class CloudflareWorkersExecutor extends LLMExecutor {
     if (reasoning !== "none") {
       body["reasoning_effort"] = reasoning;
     }
-    const data = await this.run(model, body);
+    const data = await this.run(model, body, resolveLlmCaller(options));
     if (data.errors && data.errors.length > 0) {
       throw new Error(
         `cloudflare-workers API error: ${data.errors.map((e) => e.message).join("; ")}`,
@@ -178,7 +183,7 @@ export class CloudflareWorkersExecutor extends LLMExecutor {
     if (reasoning !== "none") {
       body["reasoning_effort"] = reasoning;
     }
-    const data = await this.run(model, body);
+    const data = await this.run(model, body, resolveLlmCaller(options));
     if (data.errors && data.errors.length > 0) {
       throw new Error(
         `cloudflare-workers API error: ${data.errors.map((e) => e.message).join("; ")}`,

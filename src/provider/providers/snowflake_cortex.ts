@@ -6,6 +6,8 @@ import {
   parseModelJson,
   readAuthString,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -116,22 +118,27 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
       : "https://__account__.snowflakecomputing.com/api/v2/cortex/inference:complete";
   }
 
-  private async send(body: Record<string, unknown>): Promise<CortexResponse> {
+  private async send(
+    body: Record<string, unknown>,
+    caller: string,
+  ): Promise<CortexResponse> {
+    const requestRaw = JSON.stringify(body);
     const res = await fetch(this.baseURL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: requestRaw,
     });
+    const responseRaw = await res.text().catch(() => "");
+    logLlmWire(caller, requestRaw, responseRaw);
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       throw new Error(
-        `snowflake-cortex request failed: ${res.status} ${res.statusText} body=${text.slice(0, 500)}`,
+        `snowflake-cortex request failed: ${res.status} ${res.statusText} body=${responseRaw.slice(0, 500)}`,
       );
     }
-    return (await res.json()) as CortexResponse;
+    return JSON.parse(responseRaw) as CortexResponse;
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
@@ -155,7 +162,7 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
     if (reasoning !== "none") {
       body["reasoning_effort"] = reasoning;
     }
-    const data = await this.send(body);
+    const data = await this.send(body, resolveLlmCaller(options));
     if (data.error) {
       throw new Error(
         `snowflake-cortex API error: ${data.error.message ?? "unknown"}`,
@@ -186,7 +193,7 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
       ],
       tools: options.tools.map(toCortexTool),
     };
-    const data = await this.send(body);
+    const data = await this.send(body, resolveLlmCaller(options));
     if (data.error) {
       throw new Error(
         `snowflake-cortex API error: ${data.error.message ?? "unknown"}`,

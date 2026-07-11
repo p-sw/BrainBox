@@ -10,6 +10,8 @@ import {
   LLMExecutor,
   parseModelJson,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -98,33 +100,37 @@ export class OpenRouterExecutor extends LLMExecutor {
     log.debug(
       `call: model=${model} jsonSchema=${jsonMode ? options.jsonSchemaName : "-"} msgLen=${options.message.length}`,
     );
-    const result = await this.client.chat.send({
-      chatRequest: {
-        model,
-        messages: [
-          { role: "system", content: options.instruction },
-          { role: "user", content: options.message },
-        ],
-        reasoning: {
-          effort:
-            options.reasoningEffort ??
-            (model === this.models.identity
-              ? REASONING_EFFORT_MAP.medium
-              : REASONING_EFFORT_MAP.none),
-        },
-        responseFormat: jsonMode
-          ? {
-              type: "json_schema",
-              jsonSchema: {
-                name: options.jsonSchemaName,
-                schema: options.jsonSchema,
-                strict: true,
-              },
-            }
-          : { type: "text" },
-        stream: false,
+    const chatRequest = {
+      model,
+      messages: [
+        { role: "system" as const, content: options.instruction },
+        { role: "user" as const, content: options.message },
+      ],
+      reasoning: {
+        effort:
+          options.reasoningEffort ??
+          (model === this.models.identity
+            ? REASONING_EFFORT_MAP.medium
+            : REASONING_EFFORT_MAP.none),
       },
-    });
+      responseFormat: jsonMode
+        ? {
+            type: "json_schema" as const,
+            jsonSchema: {
+              name: options.jsonSchemaName,
+              schema: options.jsonSchema,
+              strict: true,
+            },
+          }
+        : { type: "text" as const },
+      stream: false as const,
+    };
+    const result = await this.client.chat.send({ chatRequest });
+    logLlmWire(
+      resolveLlmCaller(options),
+      JSON.stringify(chatRequest),
+      JSON.stringify(result),
+    );
 
     const raw = result.choices[0]?.message?.content;
     const content = typeof raw === "string" ? stripThinkTags(raw) : raw;
@@ -144,26 +150,30 @@ export class OpenRouterExecutor extends LLMExecutor {
     log.debug(
       `chatWithTools: model=${model} msgs=${options.messages.length} tools=${options.tools.length}`,
     );
-    const result = await this.client.chat.send({
-      chatRequest: {
-        model,
-        messages: [
-          { role: "system", content: options.instruction },
-          ...options.messages.map(toOrMessage),
-        ],
-        reasoning: {
-          effort:
-            options.reasoningEffort ??
-            (model === this.models.identity
-              ? REASONING_EFFORT_MAP.medium
-              : REASONING_EFFORT_MAP.none),
-        },
-        responseFormat: { type: "text" },
-        tools: options.tools.map(toOrTool),
-        parallelToolCalls: options.parallelToolCalls ?? false,
-        stream: false,
+    const chatRequest = {
+      model,
+      messages: [
+        { role: "system" as const, content: options.instruction },
+        ...options.messages.map(toOrMessage),
+      ],
+      reasoning: {
+        effort:
+          options.reasoningEffort ??
+          (model === this.models.identity
+            ? REASONING_EFFORT_MAP.medium
+            : REASONING_EFFORT_MAP.none),
       },
-    });
+      responseFormat: { type: "text" as const },
+      tools: options.tools.map(toOrTool),
+      parallelToolCalls: options.parallelToolCalls ?? false,
+      stream: false as const,
+    };
+    const result = await this.client.chat.send({ chatRequest });
+    logLlmWire(
+      resolveLlmCaller(options),
+      JSON.stringify(chatRequest),
+      JSON.stringify(result),
+    );
 
     const choice = result.choices[0];
     if (!choice) {

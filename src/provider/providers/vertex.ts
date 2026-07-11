@@ -6,6 +6,8 @@ import {
   parseModelJson,
   readAuthString,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -163,23 +165,26 @@ export class VertexExecutor extends LLMExecutor {
   private async generate(
     model: string,
     body: Record<string, unknown>,
+    caller: string,
   ): Promise<GeminiResponse> {
     const url = `${this.baseURL}/${encodeURIComponent(model)}:generateContent`;
+    const requestRaw = JSON.stringify(body);
     const res = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: requestRaw,
     });
+    const responseRaw = await res.text().catch(() => "");
+    logLlmWire(caller, requestRaw, responseRaw);
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       throw new Error(
-        `vertex request failed: ${res.status} ${res.statusText} body=${text.slice(0, 500)}`,
+        `vertex request failed: ${res.status} ${res.statusText} body=${responseRaw.slice(0, 500)}`,
       );
     }
-    return (await res.json()) as GeminiResponse;
+    return JSON.parse(responseRaw) as GeminiResponse;
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
@@ -203,7 +208,7 @@ export class VertexExecutor extends LLMExecutor {
         responseSchema: options.jsonSchema,
       };
     }
-    const data = await this.generate(model, body);
+    const data = await this.generate(model, body, resolveLlmCaller(options));
     if (data.error) {
       throw new Error(`vertex API error: ${data.error.message ?? "unknown"}`);
     }
@@ -229,7 +234,7 @@ export class VertexExecutor extends LLMExecutor {
       tools:
         options.tools.length > 0 ? [toGeminiTools(options.tools)] : undefined,
     };
-    const data = await this.generate(model, body);
+    const data = await this.generate(model, body, resolveLlmCaller(options));
     if (data.error) {
       throw new Error(`vertex API error: ${data.error.message ?? "unknown"}`);
     }

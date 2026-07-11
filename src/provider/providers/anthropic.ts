@@ -6,6 +6,8 @@ import {
   parseModelJson,
   readAuthString,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -139,7 +141,9 @@ export class AnthropicExecutor extends LLMExecutor {
 
   private async send(
     body: Record<string, unknown>,
+    caller: string,
   ): Promise<AnthropicResponse> {
+    const requestRaw = JSON.stringify(body);
     const res = await fetch(`${this.baseURL}/v1/messages`, {
       method: "POST",
       headers: {
@@ -147,15 +151,16 @@ export class AnthropicExecutor extends LLMExecutor {
         "anthropic-version": this.apiVersion,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: requestRaw,
     });
+    const responseRaw = await res.text().catch(() => "");
+    logLlmWire(caller, requestRaw, responseRaw);
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       throw new Error(
-        `anthropic request failed: ${res.status} ${res.statusText} body=${text.slice(0, 500)}`,
+        `anthropic request failed: ${res.status} ${res.statusText} body=${responseRaw.slice(0, 500)}`,
       );
     }
-    return (await res.json()) as AnthropicResponse;
+    return JSON.parse(responseRaw) as AnthropicResponse;
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
@@ -185,7 +190,7 @@ export class AnthropicExecutor extends LLMExecutor {
         budget_tokens: budget,
       };
     }
-    const data = await this.send(body);
+    const data = await this.send(body, resolveLlmCaller(options));
     if (data.error) {
       throw new Error(
         `anthropic API error: ${data.error.message ?? "unknown"}`,
@@ -233,7 +238,7 @@ export class AnthropicExecutor extends LLMExecutor {
         budget_tokens: budget,
       };
     }
-    const data = await this.send(body);
+    const data = await this.send(body, resolveLlmCaller(options));
     if (data.error) {
       throw new Error(
         `anthropic API error: ${data.error.message ?? "unknown"}`,

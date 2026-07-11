@@ -5,6 +5,8 @@ import {
   parseModelJson,
   readAuthString,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -235,6 +237,7 @@ export class BedrockExecutor extends LLMExecutor {
   private async invoke(
     model: string,
     body: BedrockBody,
+    caller: string,
   ): Promise<BedrockResponse> {
     const bodyStr = JSON.stringify(body);
     const path = `/model/${encodeURIComponent(model)}/invoke`;
@@ -254,13 +257,14 @@ export class BedrockExecutor extends LLMExecutor {
       headers,
       body: bodyStr,
     });
+    const responseRaw = await res.text().catch(() => "");
+    logLlmWire(caller, bodyStr, responseRaw);
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       throw new Error(
-        `bedrock request failed: ${res.status} ${res.statusText} body=${text.slice(0, 500)}`,
+        `bedrock request failed: ${res.status} ${res.statusText} body=${responseRaw.slice(0, 500)}`,
       );
     }
-    return (await res.json()) as BedrockResponse;
+    return JSON.parse(responseRaw) as BedrockResponse;
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
@@ -280,7 +284,7 @@ export class BedrockExecutor extends LLMExecutor {
       system: options.instruction,
       messages: [{ role: "user", content: options.message }],
     };
-    const data = await this.invoke(model, body);
+    const data = await this.invoke(model, body, resolveLlmCaller(options));
     const { text } = extractAnthropicContent(data);
     if (!text) {
       throw new Error("Empty response from model");
@@ -309,7 +313,7 @@ export class BedrockExecutor extends LLMExecutor {
       messages: msgs,
       tools: options.tools.map(toAnthropicTool),
     };
-    const data = await this.invoke(model, body);
+    const data = await this.invoke(model, body, resolveLlmCaller(options));
     const { text, toolCalls } = extractAnthropicContent(data);
     return { message: { content: text || undefined, toolCalls } };
   }

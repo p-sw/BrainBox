@@ -4,6 +4,8 @@ import {
   defaultReasoningEffort,
   parseModelJson,
   stripThinkTags,
+  resolveLlmCaller,
+  logLlmWire,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -188,6 +190,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
   private async sendRequest(
     body: Record<string, unknown>,
     reasoningEffort: ReasoningEffort | undefined,
+    caller: string,
   ): Promise<ChatResponse> {
     const modelName = body["model"];
     const modelStr = typeof modelName === "string" ? modelName : "";
@@ -202,21 +205,28 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       ...authHeader,
       ...this.defaultHeaders,
     };
+    const requestRaw = JSON.stringify(body);
     const res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify(body),
+      body: requestRaw,
     });
+    const responseRaw = await res.text().catch(() => "");
+    logLlmWire(caller, requestRaw, responseRaw);
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
       log.error(
-        `${this.providerName}: HTTP ${res.status} ${res.statusText} body=${text.slice(0, 500)}`,
+        `${this.providerName}: HTTP ${res.status} ${res.statusText} body=${responseRaw.slice(0, 500)}`,
       );
       throw new Error(
         `${this.providerName} request failed: ${res.status} ${res.statusText}`,
       );
     }
-    const data = (await res.json()) as ChatResponse;
+    let data: ChatResponse;
+    try {
+      data = JSON.parse(responseRaw) as ChatResponse;
+    } catch {
+      throw new Error(`${this.providerName}: invalid JSON response`);
+    }
     if (data.error) {
       log.error(
         `${this.providerName}: API error ${data.error.type ?? ""} ${data.error.message ?? ""}`,
@@ -249,7 +259,11 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
         : undefined,
       reasoningEffort: reasoning,
     });
-    const data = await this.sendRequest(body, options.reasoningEffort);
+    const data = await this.sendRequest(
+      body,
+      options.reasoningEffort,
+      resolveLlmCaller(options),
+    );
     const raw = data.choices?.[0]?.message?.content;
     const content = typeof raw === "string" ? stripThinkTags(raw) : raw;
     if (!content) {
@@ -282,7 +296,11 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       parallelToolCalls: options.parallelToolCalls ?? false,
       reasoningEffort: reasoning,
     });
-    const data = await this.sendRequest(body, options.reasoningEffort);
+    const data = await this.sendRequest(
+      body,
+      options.reasoningEffort,
+      resolveLlmCaller(options),
+    );
     const choice = data.choices?.[0];
     if (!choice) {
       log.debug(`chatWithTools: no choice in response`);
