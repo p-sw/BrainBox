@@ -36,6 +36,11 @@ function RawInput({
   onSubmit,
 }: TextInputProps): React.ReactElement {
   const [value, setValue] = useState(initialValue);
+  // ponytail: remount-equivalent when prompt/initialValue change so multi-stage
+  // forms (onboard name→seed, extras fields) don't leak the previous value.
+  useEffect(() => {
+    setValue(initialValue);
+  }, [prompt, initialValue]);
   useInput((input, key) => {
     if (key.return) {
       onSubmit(value);
