@@ -745,7 +745,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
   static async create(
     displayName: string,
     seed: string,
-  ): Promise<{ brainId: string; brain: Brain } | null> {
+  ): Promise<{ brainId: string; brain: Brain } | { error: string }> {
     log.debug(`Brain.create: starting name="${displayName}"`);
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
@@ -813,9 +813,15 @@ export class Brain<BB extends BrainItem = BrainItem> {
       log.debug(`Brain.create: brainbase saved (id=${brainId})`);
       return { brainId, brain: new Brain(db, space, brainbase, memory) };
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      logger.error(`Failed to create brain "${displayName}": ${reason}`);
-      return null;
+      let reason =
+        error instanceof Error
+          ? `${error.message} (${error.name})`
+          : String(error);
+      if (error instanceof BadRequestResponseError) {
+        reason = `${reason} ${JSON.stringify(error.body)}`;
+      }
+      log.debug(`Brain.create failed: ${reason}`);
+      return { error: reason };
     }
   }
 

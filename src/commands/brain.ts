@@ -58,7 +58,8 @@ export async function createBrain(
     `createBrain: name="${displayName}" seed length=${seed.length} schedule=${options.schedule}`,
   );
   const result = await Brain.create(displayName, seed);
-  if (!result) {
+  if ("error" in result) {
+    logger.error(`Failed to create brain "${displayName}": ${result.error}`);
     process.exitCode = 1;
     return;
   }
