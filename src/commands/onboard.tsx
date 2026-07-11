@@ -153,8 +153,8 @@ function ModelApp({
     <Box flexDirection="column">
       <Text>{chalk.bold("Step 1/4")} — Default model (both slots)</Text>
       <Text dimColor>
-        e.g. <Text color="cyan">{provider}/</Text>model-name — fine-tune later
-        with <Text color="cyan">brainbox model</Text>
+        model name, or <Text color="cyan">{provider}/</Text>model — fine-tune
+        later with <Text color="cyan">brainbox model</Text>
       </Text>
       <TextInput
         prompt={`${provider}/model> `}
@@ -164,13 +164,17 @@ function ModelApp({
             setError("Model cannot be empty");
             return;
           }
-          if (!value.startsWith(`${provider}/`)) {
-            setError(`Must start with "${provider}/"`);
+          // model may contain `/` (e.g. org/model); only treat as full slot
+          // when it already starts with this provider's prefix
+          const prefix = `${provider}/`;
+          const full = value.startsWith(prefix) ? value : `${prefix}${value}`;
+          if (full === prefix) {
+            setError("Model cannot be empty");
             return;
           }
-          setModelSlot("identity", value);
-          setModelSlot("conversation", value);
-          onDone(value);
+          setModelSlot("identity", full);
+          setModelSlot("conversation", full);
+          onDone(full);
         }}
       />
       {error && <Text color="red">{error}</Text>}
