@@ -4,6 +4,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { logger } from "@/utils/logger";
 import { TextInput } from "@/ui/TextInput";
+import { Select } from "@/ui/Select";
 import { listProviderNames } from "@/provider/llm";
 import { registerCommand } from "@/commands";
 import { PROVIDER_EXTRA_FIELDS, setProviderAuth } from "@/config/file/auth";
@@ -38,27 +39,15 @@ function ProviderApp({
     return (
       <Box flexDirection="column">
         <Text>{chalk.bold("Step 1/4")} — Choose your first provider</Text>
-        <Text dimColor>Enter an exact provider name (see list below)</Text>
-        <TextInput
+        <Text dimColor>↑↓ to move, type to filter, enter to select</Text>
+        <Select
           prompt="provider> "
-          onSubmit={(v) => {
-            const p = v.trim();
-            if (!p) {
-              setError("Provider name is required");
-              return;
-            }
-            if (!providers.includes(p)) {
-              setError(`Unknown provider "${p}"`);
-              return;
-            }
+          items={providers}
+          onSelect={(p) => {
             setError(null);
             setStage({ kind: "apiKey", provider: p });
           }}
         />
-        <Text dimColor>
-          known ({providers.length}): {providers.slice(0, 10).join(", ")}
-          {providers.length > 10 ? "…" : ""}
-        </Text>
         {error && <Text color="red">{error}</Text>}
       </Box>
     );
@@ -305,22 +294,18 @@ function ChannelApp({
           {chalk.bold("Step 4/4")} — Channel for{" "}
           <Text color="cyan">{displayName}</Text>
         </Text>
-        <Text dimColor>discord | telegram | skip</Text>
-        <TextInput
+        <Text dimColor>↑↓ to move, type to filter, enter to select</Text>
+        <Select
           prompt="channel> "
-          onSubmit={(raw) => {
-            const v = raw.trim().toLowerCase();
+          items={["discord", "telegram", "skip"]}
+          onSelect={(v) => {
             if (v === "skip") {
               logger.info("Skipped channel setup.");
               onDone();
               return;
             }
-            if (v !== "discord" && v !== "telegram") {
-              setError(`Expected "discord", "telegram", or "skip"`);
-              return;
-            }
             setError(null);
-            setStage({ kind: "token", kind_: v });
+            setStage({ kind: "token", kind_: v as "discord" | "telegram" });
           }}
         />
         {error && <Text color="red">{error}</Text>}

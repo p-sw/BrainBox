@@ -1,45 +1,12 @@
 import { useEffect, useState } from "react";
 import { Text, useInput, useStdin } from "ink";
+import { takePipedLine } from "@/ui/pipedStdin";
 
 export interface TextInputProps {
   prompt: string;
   initialValue?: string;
   placeholder?: string;
   onSubmit: (value: string) => void;
-}
-
-// ponytail: piped mode (no TTY) drains the entire stdin buffer up front
-// and hands one line at a time to whichever TextInput is mounted.
-type Buffer = string[];
-let pipedBuffer: Buffer | null = null;
-let pipedSubscribers: Array<(line: string) => void> = [];
-
-function drainPiped(stdin: NodeJS.ReadStream): void {
-  if (pipedBuffer !== null) return;
-  const buf: Buffer = [];
-  pipedBuffer = buf;
-  const tryRead = (): void => {
-    let chunk: string | Buffer | null;
-    while ((chunk = stdin.read()) !== null) {
-      const text = chunk.toString();
-      for (const line of text.split(/\r?\n/)) {
-        if (line.length > 0) buf.push(line);
-      }
-    }
-    if (buf.length === 0) {
-      stdin.once("readable", tryRead);
-      stdin.once("end", tryRead);
-      return;
-    }
-    while (pipedSubscribers.length > 0 && buf.length > 0) {
-      const next = pipedSubscribers.shift();
-      if (!next) break;
-      const line = buf.shift();
-      if (line === undefined) break;
-      next(line);
-    }
-  };
-  tryRead();
 }
 
 function PipedInput({
@@ -51,17 +18,7 @@ function PipedInput({
 }: TextInputProps & { stdin: NodeJS.ReadStream }): React.ReactElement {
   const [value] = useState(initialValue);
   useEffect(() => {
-    drainPiped(stdin);
-    pipedSubscribers.push(onSubmit);
-    // ponytail: if buffer already holds lines, fire newest subscriber
-    // immediately so validation-error re-prompts do not deadlock.
-    if (pipedBuffer && pipedBuffer.length > 0) {
-      const line = pipedBuffer.shift();
-      if (line !== undefined) onSubmit(line);
-    }
-    return () => {
-      pipedSubscribers = pipedSubscribers.filter((s) => s !== onSubmit);
-    };
+    return takePipedLine(stdin, onSubmit);
   }, [stdin, onSubmit]);
   const shown = value.length > 0 ? value : placeholder;
   return (
