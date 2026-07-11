@@ -162,19 +162,21 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
   async regenerateSchedules(): Promise<void> {
     const today = new Date();
-    const tomorrow = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate() + 1,
-    );
-    await this.createDailySchedule(tomorrow);
-    await this.createDailySchedule(today);
     const nextMonth = new Date(
       today.getFullYear(),
       today.getMonth() + 1,
       today.getDate(),
     );
     await this.createMonthlySchedule(nextMonth);
+
+    const tomorrow = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() + 1,
+    );
+
+    await this.createDailySchedule(tomorrow);
+    await this.createDailySchedule(today);
   }
 
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
