@@ -67,9 +67,9 @@ export async function startChannels(): Promise<number> {
 export async function daemon(): Promise<void> {
   const logDir = join(config.brainboxRoot, "logs");
   logger.configure({ logDir });
-  configureLlmLog(join(logDir, "llm"));
+  configureLlmLog(config.debug ? join(logDir, "llm") : undefined);
   logger.debug(
-    `daemon: boot (logDir=${logDir}, llmLogDir=${join(logDir, "llm")})`,
+    `daemon: boot (debug=${config.debug}, logDir=${logDir}, llmLog=${config.debug})`,
   );
   const started = await startChannels();
   if (started === 0) {
