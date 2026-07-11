@@ -313,6 +313,18 @@ export abstract class BaseChannel<
     }, IS_CHATTING_DEBOUNCE_MS);
   }
 
+  /**
+   * Apply current schedule availability to the platform presence and start
+   * the transition watcher. Call once the channel client is ready.
+   */
+  protected async initAvailability(): Promise<void> {
+    const current = await this.brain.getAvailability();
+    this.previousAvailability = current.status;
+    logger.debug(`initAvailability: ${current.status}`);
+    await this.setAvailability(current.status);
+    this.ensureAvailabilityWatcher();
+  }
+
   private ensureAvailabilityWatcher(): void {
     if (this.isCronStarted(AVAILABILITY_WATCHER_KEY)) return;
     logger.debug(
@@ -328,6 +340,9 @@ export abstract class BaseChannel<
         logger.debug(
           `availabilityWatcher: ${prev ?? "(initial)"} → ${current.status}`,
         );
+        if (prev !== current.status) {
+          await this.setAvailability(current.status);
+        }
         if (prev !== null && prev !== "online" && current.status === "online") {
           await this.flushDeferred();
         }

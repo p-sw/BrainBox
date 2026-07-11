@@ -56,6 +56,7 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         logger.debug(`DiscordClientReady: resolving configured channel ${channelId}`);
         void this.resolveConfiguredChannel(channelId);
       }
+      void this.initAvailability();
     });
     this.client.on(Events.MessageCreate, (msg) => {
       if (msg.author.bot) return;

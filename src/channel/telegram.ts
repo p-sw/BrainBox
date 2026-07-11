@@ -32,6 +32,7 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
     this.registerActive();
     this.bot.onStart(({ info }) => {
       logger.success(`Telegram ready as @${info.username}`);
+      void this.initAvailability();
     });
     this.bot.on("message", (ctx) => {
       if (ctx.from?.isBot()) return;
