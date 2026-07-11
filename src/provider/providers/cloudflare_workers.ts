@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import {
   LLMExecutor,
   defaultReasoningEffort,
+  parseModelJson,
   readAuthString,
   stripThinkTags,
   type CallOptions,
@@ -13,7 +14,17 @@ import {
 
 type ChatMessageWire =
   | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string }
+  | {
+      role: "assistant";
+      content: string;
+      // CF Workers AI uses a flat tool_calls shape (name + arguments), not
+      // the nested OpenAI function wrapper.
+      tool_calls?: Array<{
+        id?: string;
+        name: string;
+        arguments: unknown;
+      }>;
+    }
   | { role: "tool"; content: string; tool_call_id: string };
 
 type CloudflareResponse = {
@@ -30,7 +41,19 @@ type CloudflareResponse = {
 
 function toCloudflareMessage(m: ChatMessages): ChatMessageWire {
   if (m.role === "assistant") {
-    return { role: "assistant", content: m.content ?? "" };
+    return {
+      role: "assistant",
+      content: m.content ?? "",
+      tool_calls: m.toolCalls?.map((c) => {
+        let args: unknown = c.function.arguments;
+        try {
+          args = JSON.parse(c.function.arguments);
+        } catch {
+          // keep raw string
+        }
+        return { id: c.id, name: c.function.name, arguments: args };
+      }),
+    };
   }
   if (m.role === "tool") {
     return { role: "tool", content: m.content, tool_call_id: m.toolCallId };
@@ -124,7 +147,7 @@ export class CloudflareWorkersExecutor extends LLMExecutor {
     if (!content) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? JSON.parse(content) : content) as T;
+    return (jsonMode ? parseModelJson(content) : content) as T;
   }
 
   async chatWithTools(
