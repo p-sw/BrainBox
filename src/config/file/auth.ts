@@ -30,7 +30,8 @@ import { configFile } from "../loader";
 //   gmi               apiKey
 //   zai               apiKey
 //   zenmux            apiKey
-//   MiniMax           apiKey
+//   minimax           apiKey  (intl: api.minimax.io — paygo or Token Plan sk-cp-)
+//   minimax-cn        apiKey  (China: api.minimaxi.com — paygo or Token Plan sk-cp-)
 //   ionet             apiKey
 //   baseten           apiKey
 //   cortecs           apiKey
