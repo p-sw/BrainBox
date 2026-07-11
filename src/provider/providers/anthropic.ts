@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   LLMExecutor,
   defaultReasoningEffort,
+  parseModelJson,
   readAuthString,
   stripThinkTags,
   type CallOptions,
@@ -199,7 +200,7 @@ export class AnthropicExecutor extends LLMExecutor {
     if (!text) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? JSON.parse(text) : text) as T;
+    return (jsonMode ? parseModelJson(text) : text) as T;
   }
 
   async chatWithTools(

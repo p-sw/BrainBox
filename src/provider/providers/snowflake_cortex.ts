@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   LLMExecutor,
   defaultReasoningEffort,
+  parseModelJson,
   readAuthString,
   stripThinkTags,
   type CallOptions,
@@ -166,7 +167,7 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
     if (!content) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? JSON.parse(content) : content) as T;
+    return (jsonMode ? parseModelJson(content) : content) as T;
   }
 
   async chatWithTools(

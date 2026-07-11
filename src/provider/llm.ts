@@ -75,13 +75,25 @@ export function defaultReasoningEffort(
   return model === identityModel ? "medium" : "none";
 }
 
-// Some models embed CoT as <think>…</think> inside content, or wrap JSON in
-// ``` fences. Strip before JSON.parse / persona text.
+// Some models embed CoT as <think>…</think> inside content. Strip before
+// JSON.parse / persona text so structured calls don't choke on the wrapper.
 export function stripThinkTags(content: string): string {
-  let s = content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "").trim();
-  const fence = s.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
-  if (fence?.[1]) s = fence[1].trim();
-  return s;
+  return content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+// jsonMode helper: strip think tags, then unwrap ``` / ```json fences even when
+// surrounded by prose, then JSON.parse.
+export function parseModelJson(content: string): unknown {
+  const cleaned = stripThinkTags(content);
+  try {
+    return JSON.parse(cleaned);
+  } catch (first) {
+    const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence?.[1]) {
+      return JSON.parse(fence[1].trim());
+    }
+    throw first;
+  }
 }
 
 export function readAuthString(

@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import { createHmac, createHash } from "node:crypto";
 import {
   LLMExecutor,
+  parseModelJson,
   readAuthString,
   stripThinkTags,
   type CallOptions,
@@ -284,7 +285,7 @@ export class BedrockExecutor extends LLMExecutor {
     if (!text) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? JSON.parse(text) : text) as T;
+    return (jsonMode ? parseModelJson(text) : text) as T;
   }
 
   async chatWithTools(

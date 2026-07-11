@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import {
   LLMExecutor,
   defaultReasoningEffort,
+  parseModelJson,
   stripThinkTags,
   type CallOptions,
   type ChatChoice,
@@ -256,7 +257,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       throw new Error("Empty response from model");
     }
     log.debug(`call: response ${content.length} chars`);
-    return (jsonMode ? JSON.parse(content) : content) as T;
+    return (jsonMode ? parseModelJson(content) : content) as T;
   }
 
   async chatWithTools(

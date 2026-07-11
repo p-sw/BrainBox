@@ -8,6 +8,7 @@ import type {
 } from "@openrouter/sdk/models";
 import {
   LLMExecutor,
+  parseModelJson,
   stripThinkTags,
   type CallOptions,
   type ChatChoice,
@@ -133,7 +134,7 @@ export class OpenRouterExecutor extends LLMExecutor {
     }
     log.debug(`call: response ${content.length} chars`);
 
-    return (jsonMode ? JSON.parse(content) : content) as T;
+    return (jsonMode ? parseModelJson(content) : content) as T;
   }
 
   async chatWithTools(

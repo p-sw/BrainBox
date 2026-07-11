@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import { z } from "zod";
 import {
   LLMExecutor,
+  parseModelJson,
   readAuthString,
   stripThinkTags,
   type CallOptions,
@@ -143,7 +144,7 @@ export class GitLabDuoExecutor extends LLMExecutor {
     if (!content) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? JSON.parse(content) : content) as T;
+    return (jsonMode ? parseModelJson(content) : content) as T;
   }
 
   async chatWithTools(
