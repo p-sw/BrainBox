@@ -12,6 +12,8 @@ export class OllamaExecutor extends OpenAICompatibleExecutor {
       apiKey: opts.apiKey || "ollama",
       conversationModel: opts.conversationModel,
       identityModel: opts.identityModel,
+      // Ollama's OpenAI shim often rejects / ignores json_schema strict.
+      supportsResponseFormat: false,
     });
   }
 }

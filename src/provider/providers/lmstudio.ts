@@ -12,6 +12,7 @@ export class LmStudioExecutor extends OpenAICompatibleExecutor {
       apiKey: opts.apiKey || "lm-studio",
       conversationModel: opts.conversationModel,
       identityModel: opts.identityModel,
+      supportsResponseFormat: false,
     });
   }
 }

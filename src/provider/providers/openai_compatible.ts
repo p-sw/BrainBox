@@ -1,8 +1,10 @@
 import { logger } from "@/utils/logger";
 import {
   LLMExecutor,
+  buildStructuredJsonRequest,
   defaultReasoningEffort,
   parseModelJson,
+  parseStructuredJsonResult,
   stripThinkTags,
   resolveLlmCaller,
   logLlmWire,
@@ -30,6 +32,11 @@ export type OpenAICompatibleOptions = {
   chatPath?: string;
   noBearerPrefix?: boolean;
   reasoningEffortInQuery?: boolean;
+  /**
+   * When false, jsonMode uses a forced schema tool instead of response_format.
+   * Hosts without OpenAI json_schema support (MiniMax, many local servers).
+   */
+  supportsResponseFormat?: boolean;
   providerName: string;
 };
 
@@ -136,6 +143,8 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
   protected readonly chatPath: string;
   protected readonly noBearerPrefix: boolean;
   protected readonly reasoningEffortInQuery: boolean;
+  /** When false, jsonMode routes through a schema tool (no response_format). */
+  protected readonly supportsResponseFormat: boolean;
 
   constructor(opts: OpenAICompatibleOptions) {
     super();
@@ -146,6 +155,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     this.chatPath = opts.chatPath ?? "/chat/completions";
     this.noBearerPrefix = opts.noBearerPrefix ?? false;
     this.reasoningEffortInQuery = opts.reasoningEffortInQuery ?? false;
+    this.supportsResponseFormat = opts.supportsResponseFormat ?? true;
     this.models = {
       conversation: opts.conversationModel,
       identity: opts.identityModel,
@@ -250,6 +260,9 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
+    if ("jsonSchemaName" in options && !this.supportsResponseFormat) {
+      return this.callJsonViaTool(model, options);
+    }
     const jsonMode = "jsonSchemaName" in options;
     const reasoning = defaultReasoningEffort(
       options.reasoningEffort,
@@ -295,6 +308,29 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     }
     log.debug(`call: response ${content.length} chars`);
     return (jsonMode ? parseModelJson(content) : content) as T;
+  }
+
+  /** Schema-as-tool path for hosts without response_format/json_schema. */
+  protected async callJsonViaTool<T>(
+    model: string,
+    options: CallOptions & {
+      jsonSchemaName: string;
+      jsonSchema: Record<string, unknown> | undefined;
+    },
+  ): Promise<T> {
+    const { toolName, tool, instruction } = buildStructuredJsonRequest(options);
+    log.debug(
+      `callJsonViaTool: provider=${this.providerName} model=${model} tool=${toolName}`,
+    );
+    const choice = await this.chatWithTools(model, {
+      caller: options.caller ?? options.jsonSchemaName,
+      instruction,
+      messages: [{ role: "user", content: options.message }],
+      tools: [tool],
+      reasoningEffort: "none",
+      parallelToolCalls: false,
+    });
+    return parseStructuredJsonResult(choice, toolName) as T;
   }
 
   async chatWithTools(

@@ -2,8 +2,9 @@ import { logger } from "@/utils/logger";
 import { z } from "zod";
 import {
   LLMExecutor,
+  buildStructuredJsonRequest,
   defaultReasoningEffort,
-  parseModelJson,
+  parseStructuredJsonResult,
   readAuthString,
   stripThinkTags,
   resolveLlmCaller,
@@ -164,7 +165,26 @@ export class AnthropicExecutor extends LLMExecutor {
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
-    const jsonMode = "jsonSchemaName" in options;
+    // No response_format — force a schema tool (and tool_choice) for jsonMode.
+    if ("jsonSchemaName" in options) {
+      const { toolName, tool, instruction } = buildStructuredJsonRequest({
+        instruction: options.instruction,
+        jsonSchemaName: options.jsonSchemaName,
+        jsonSchema: options.jsonSchema,
+      });
+      const choice = await this.chatWithTools(model, {
+        caller: options.caller ?? options.jsonSchemaName,
+        instruction,
+        messages: [{ role: "user", content: options.message }],
+        tools: [tool],
+        // Structured payload — skip thinking budget competition.
+        reasoningEffort: "none",
+        // Force the schema tool (Anthropic supports tool_choice).
+        toolChoice: { type: "tool", name: toolName },
+      });
+      return parseStructuredJsonResult(choice, toolName) as T;
+    }
+
     const reasoning = defaultReasoningEffort(
       options.reasoningEffort,
       model,
@@ -172,7 +192,7 @@ export class AnthropicExecutor extends LLMExecutor {
     );
     const log = logger.child("llm:anthropic");
     log.debug(
-      `call: model=${model} jsonSchema=${jsonMode ? options.jsonSchemaName : "-"} msgLen=${options.message.length}`,
+      `call: model=${model} jsonSchema=- msgLen=${options.message.length}`,
     );
     const outputCap = 4096;
     const body: Record<string, unknown> = {
@@ -205,7 +225,7 @@ export class AnthropicExecutor extends LLMExecutor {
     if (!text) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? parseModelJson(text) : text) as T;
+    return text as T;
   }
 
   async chatWithTools(
@@ -230,6 +250,12 @@ export class AnthropicExecutor extends LLMExecutor {
       messages: msgs,
       tools: options.tools.map(toAnthropicTool),
     };
+    if (options.toolChoice) {
+      body["tool_choice"] = {
+        type: "tool",
+        name: options.toolChoice.name,
+      };
+    }
     if (reasoning !== "none") {
       const budget = REASONING_BUDGET[reasoning];
       body["max_tokens"] = budget + outputCap;

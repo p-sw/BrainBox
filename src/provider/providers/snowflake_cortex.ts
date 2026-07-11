@@ -2,8 +2,9 @@ import { logger } from "@/utils/logger";
 import { z } from "zod";
 import {
   LLMExecutor,
+  buildStructuredJsonRequest,
   defaultReasoningEffort,
-  parseModelJson,
+  parseStructuredJsonResult,
   readAuthString,
   stripThinkTags,
   resolveLlmCaller,
@@ -142,15 +143,32 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
-    const jsonMode = "jsonSchemaName" in options;
+    const log = logger.child("llm:snowflake-cortex");
+    if ("jsonSchemaName" in options) {
+      log.debug(
+        `call: model=${model} jsonSchema=${options.jsonSchemaName} via tool`,
+      );
+      const { toolName, tool, instruction } = buildStructuredJsonRequest({
+        instruction: options.instruction,
+        jsonSchemaName: options.jsonSchemaName,
+        jsonSchema: options.jsonSchema,
+      });
+      const choice = await this.chatWithTools(model, {
+        caller: options.caller ?? options.jsonSchemaName,
+        instruction,
+        messages: [{ role: "user", content: options.message }],
+        tools: [tool],
+        reasoningEffort: "none",
+      });
+      return parseStructuredJsonResult(choice, toolName) as T;
+    }
     const reasoning = defaultReasoningEffort(
       options.reasoningEffort,
       model,
       this.models.identity,
     );
-    const log = logger.child("llm:snowflake-cortex");
     log.debug(
-      `call: model=${model} jsonSchema=${jsonMode ? options.jsonSchemaName : "-"} msgLen=${options.message.length}`,
+      `call: model=${model} jsonSchema=- msgLen=${options.message.length}`,
     );
     const body: Record<string, unknown> = {
       model,
@@ -174,7 +192,7 @@ export class SnowflakeCortexExecutor extends LLMExecutor {
     if (!content) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? parseModelJson(content) : content) as T;
+    return content as T;
   }
 
   async chatWithTools(

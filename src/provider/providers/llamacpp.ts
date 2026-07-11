@@ -12,6 +12,7 @@ export class LlamaCppExecutor extends OpenAICompatibleExecutor {
       apiKey: opts.apiKey || "llama.cpp",
       conversationModel: opts.conversationModel,
       identityModel: opts.identityModel,
+      supportsResponseFormat: false,
     });
   }
 }

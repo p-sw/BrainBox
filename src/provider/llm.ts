@@ -56,6 +56,11 @@ export type ChatWithToolsOptions = {
   caller?: string;
   reasoningEffort?: ReasoningEffort;
   parallelToolCalls?: boolean;
+  /**
+   * Force a specific tool when the host supports tool_choice
+   * (Anthropic `{type:"tool",name}`, OpenAI-style function).
+   */
+  toolChoice?: { type: "tool"; name: string };
 };
 
 // --- Abstract base ----------------------------------------------------------
@@ -85,19 +90,135 @@ export function stripThinkTags(content: string): string {
   return content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "").trim();
 }
 
-// jsonMode helper: strip think tags, then unwrap ``` / ```json fences even when
-// surrounded by prose, then JSON.parse.
+// jsonMode helper: strip think tags, unwrap common model wrappers
+// (``` fences, double-encoded JSON strings, prose-around-JSON), then parse.
 export function parseModelJson(content: string): unknown {
   const cleaned = stripThinkTags(content);
-  try {
-    return JSON.parse(cleaned);
-  } catch (first) {
-    const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fence?.[1]) {
-      return JSON.parse(fence[1].trim());
+  const candidates: string[] = [cleaned];
+  const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence?.[1]) candidates.push(fence[1].trim());
+  const extracted = extractJsonSlice(cleaned);
+  if (extracted) candidates.push(extracted);
+
+  let lastErr: unknown;
+  for (const candidate of candidates) {
+    try {
+      return decodeJsonValue(candidate);
+    } catch (err) {
+      lastErr = err;
     }
-    throw first;
   }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("Failed to parse model JSON");
+}
+
+function decodeJsonValue(text: string): unknown {
+  let value: unknown = JSON.parse(text);
+  // Models sometimes return a JSON string that itself holds JSON:
+  // "\"{\\\"a\\\":1}\"" or "{\"a\":1}" as a quoted string value.
+  for (let i = 0; i < 2 && typeof value === "string"; i++) {
+    const inner = value.trim();
+    if (
+      !(
+        (inner.startsWith("{") && inner.endsWith("}")) ||
+        (inner.startsWith("[") && inner.endsWith("]")) ||
+        (inner.startsWith('"') && inner.endsWith('"'))
+      )
+    ) {
+      break;
+    }
+    value = JSON.parse(inner);
+  }
+  return value;
+}
+
+// First balanced {...} or [...] slice, string-aware. Handles prose wrappers.
+function extractJsonSlice(text: string): string | undefined {
+  const start = text.search(/[\{\[]/);
+  if (start < 0) return undefined;
+  const open = text[start]!;
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return undefined;
+}
+
+/** Sanitize a schema name into a function-tool identifier. */
+export function schemaToolName(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9_]/g, "_").replace(/^(\d)/, "_$1");
+  return cleaned.length > 0 ? cleaned : "submit_result";
+}
+
+/**
+ * Build a single-tool request that forces structured output for hosts without
+ * response_format / json_schema. The tool's parameters ARE the schema.
+ */
+export function buildStructuredJsonRequest(options: {
+  instruction: string;
+  jsonSchemaName: string;
+  jsonSchema: Record<string, unknown> | undefined;
+}): {
+  toolName: string;
+  tool: ChatFunctionTool;
+  instruction: string;
+} {
+  const toolName = schemaToolName(options.jsonSchemaName);
+  return {
+    toolName,
+    tool: {
+      name: toolName,
+      description: `Submit the structured ${options.jsonSchemaName} result.`,
+      parameters: options.jsonSchema ?? {
+        type: "object",
+        additionalProperties: true,
+      },
+    },
+    instruction: `${options.instruction}
+
+You MUST call the \`${toolName}\` tool exactly once with the complete answer.
+Do not write the JSON as plain text or inside a markdown code fence.`,
+  };
+}
+
+/** Prefer tool-call arguments; fall back to content + loose parse. */
+export function parseStructuredJsonResult(
+  choice: ChatChoice,
+  toolName: string,
+): unknown {
+  const call =
+    choice.message.toolCalls?.find((c) => c.function.name === toolName) ??
+    choice.message.toolCalls?.[0];
+  if (call?.function.arguments) {
+    return parseModelJson(call.function.arguments);
+  }
+  if (choice.message.content) {
+    return parseModelJson(choice.message.content);
+  }
+  throw new Error("Empty response from model");
 }
 
 export function readAuthString(

@@ -8,12 +8,14 @@ import type { ReasoningEffort } from "../llm";
 // on. OpenAI reasoning_effort is ignored; map it to MiniMax `thinking`.
 // Pay-as-you-go and Token Plan (sk-cp-...) keys both work on these hosts.
 //
-// Gotchas that produce our "Empty response from model" error:
+// Gotchas:
 // - No max_completion_tokens: thinking can consume the whole (low) default
 //   budget and leave content as "" / "\n".
-// - response_format / parallel_tool_calls are not in MiniMax's OpenAPI schema;
-//   unknown fields are rejected or return base_resp errors with empty content.
-// - jsonMode + adaptive thinking often yields whitespace-only final content.
+// - response_format / parallel_tool_calls / tool_choice are not in MiniMax's
+//   OpenAPI schema; unknown fields can yield HTTP 200 with base_resp errors
+//   and empty choices.
+// - No response_format/json_schema → supportsResponseFormat:false routes
+//   structured calls through the shared schema-as-tool path.
 class MiniMaxBase extends OpenAICompatibleExecutor {
   protected override buildBody(opts: {
     model: string;
@@ -60,6 +62,8 @@ function minimaxOpts(
     apiKey: opts.apiKey,
     conversationModel: opts.conversationModel,
     identityModel: opts.identityModel,
+    // No response_format in MiniMax OpenAPI — force schema-as-tool.
+    supportsResponseFormat: false,
   };
 }
 

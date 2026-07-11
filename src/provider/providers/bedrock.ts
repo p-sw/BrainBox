@@ -2,7 +2,8 @@ import { logger } from "@/utils/logger";
 import { createHmac, createHash } from "node:crypto";
 import {
   LLMExecutor,
-  parseModelJson,
+  buildStructuredJsonRequest,
+  parseStructuredJsonResult,
   readAuthString,
   stripThinkTags,
   resolveLlmCaller,
@@ -21,6 +22,7 @@ type BedrockBody = {
   system?: string;
   messages: Array<Record<string, unknown>>;
   tools?: Array<Record<string, unknown>>;
+  tool_choice?: { type: string; name?: string };
 };
 
 type BedrockResponse = Record<string, unknown>;
@@ -268,11 +270,26 @@ export class BedrockExecutor extends LLMExecutor {
   }
 
   async call<T>(model: string, options: CallOptions): Promise<T> {
-    const jsonMode = "jsonSchemaName" in options;
     const log = logger.child("llm:bedrock");
-    log.debug(
-      `call: model=${model} jsonSchema=${jsonMode ? options.jsonSchemaName : "-"} msgLen=${options.message.length}`,
-    );
+    if ("jsonSchemaName" in options) {
+      log.debug(
+        `call: model=${model} jsonSchema=${options.jsonSchemaName} via tool`,
+      );
+      const { toolName, tool, instruction } = buildStructuredJsonRequest({
+        instruction: options.instruction,
+        jsonSchemaName: options.jsonSchemaName,
+        jsonSchema: options.jsonSchema,
+      });
+      const choice = await this.chatWithTools(model, {
+        caller: options.caller ?? options.jsonSchemaName,
+        instruction,
+        messages: [{ role: "user", content: options.message }],
+        tools: [tool],
+        toolChoice: { type: "tool", name: toolName },
+      });
+      return parseStructuredJsonResult(choice, toolName) as T;
+    }
+    log.debug(`call: model=${model} jsonSchema=- msgLen=${options.message.length}`);
     if (!model.startsWith("anthropic.") && !model.startsWith("us.anthropic.")) {
       throw new Error(
         `bedrock provider currently only supports Anthropic models (got ${model})`,
@@ -289,7 +306,7 @@ export class BedrockExecutor extends LLMExecutor {
     if (!text) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? parseModelJson(text) : text) as T;
+    return text as T;
   }
 
   async chatWithTools(
@@ -305,7 +322,6 @@ export class BedrockExecutor extends LLMExecutor {
         `bedrock provider currently only supports Anthropic models (got ${model})`,
       );
     }
-    const { system, msgs } = toAnthropicMessages(options.messages);
     const body: BedrockBody = {
       anthropic_version: "bedrock-2023-05-31",
       max_tokens: 4096,
@@ -313,6 +329,12 @@ export class BedrockExecutor extends LLMExecutor {
       messages: msgs,
       tools: options.tools.map(toAnthropicTool),
     };
+    if (options.toolChoice) {
+      body.tool_choice = {
+        type: "tool",
+        name: options.toolChoice.name,
+      };
+    }
     const data = await this.invoke(model, body, resolveLlmCaller(options));
     const { text, toolCalls } = extractAnthropicContent(data);
     return { message: { content: text || undefined, toolCalls } };
