@@ -5,7 +5,7 @@ import { brainManager } from "@/brain/manager";
 import { Brain } from "@/brain";
 import { logger } from "@/utils/logger";
 import { sendToDaemon, type DaemonResponse } from "@/utils/daemonClient";
-import { DO_ACTIONS, type DoAction } from "@/channel/base";
+import { DO_ACTIONS, type DoAction, VIEW_THINGS, type ViewThing } from "@/channel/base";
 
 export async function listBrains(): Promise<void> {
   const brains = await brainManager.listBrains();
@@ -114,6 +114,31 @@ export async function doAction(action: string, brainId: string): Promise<void> {
   logger.success(`Forced ${action} for "${name}" (${brainId}).`);
 }
 
+export async function viewThing(thing: string, brainId: string): Promise<void> {
+  if (!VIEW_THINGS.includes(thing as ViewThing)) {
+    logger.error(
+      `Unknown thing "${thing}". Expected one of: ${VIEW_THINGS.join(", ")}`,
+    );
+    process.exit(1);
+  }
+  logger.debug(`view: thing=${thing} brainId=${brainId}`);
+  // ponytail: sendToDaemon logs and process.exit(1)s on any failure.
+  const response = await sendToDaemon<
+    DaemonResponse<{
+      thing: string;
+      brainId: string;
+      displayName: string;
+      value: unknown;
+    }>
+  >({
+    command: "view",
+    args: { thing, brainId },
+  });
+  const name = response.result?.displayName ?? brainId;
+  logger.info(`${thing} — "${name}" (${brainId})`);
+  console.log(JSON.stringify(response.result?.value ?? null, null, 2));
+}
+
 export function register(program: Command): Command {
   const cmd = registerCommand(program, {
     name: "brain",
@@ -143,5 +168,11 @@ export function register(program: Command): Command {
       `Force-run a daemon job (${DO_ACTIONS.join(" | ")}) for a live brain`,
     )
     .action(doAction);
+  cmd
+    .command("view <thing> <brainId>")
+    .description(
+      `Inspect a live brain value (${VIEW_THINGS.join(" | ")})`,
+    )
+    .action(viewThing);
   return cmd;
 }

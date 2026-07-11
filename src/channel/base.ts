@@ -3,7 +3,7 @@ import type { BrainItemWithChannel } from "@/brain/manager";
 import type { MessageHistoryEntry } from "@/brain/messageHistory";
 import type { AvailabilityStatus } from "@/provider/schema";
 import { logger } from "@/utils/logger";
-import { formatDateKey } from "@/brain/schedule";
+import { formatDateKey, formatMonthKey } from "@/brain/schedule";
 import { Cron, scheduledJobs, type CronCallback } from "croner";
 
 const MESSAGE_DEBOUNCE_MS = 1500;
@@ -22,6 +22,15 @@ const SCHEDULE_NOON_CRON_PATTERN = "0 12 * * *"; // every day at 12:00 (backup t
 
 export const DO_ACTIONS = ["generateSchedule", "sleepMemory"] as const;
 export type DoAction = (typeof DO_ACTIONS)[number];
+
+export const VIEW_THINGS = [
+  "daily-schedule",
+  "monthly-schedule",
+  "sending-queue",
+  "deferred-queue",
+  "today-availability",
+] as const;
+export type ViewThing = (typeof VIEW_THINGS)[number];
 
 export interface PairingInbound {
   content: string;
@@ -437,6 +446,70 @@ export abstract class BaseChannel<
       await channel.runSleepMemory(true);
     }
     return { ok: true, displayName };
+  }
+
+  /** Snapshot an internal brain/channel value for CLI inspection. */
+  static async view(
+    brainId: string,
+    thing: ViewThing,
+  ): Promise<
+    | { ok: true; displayName: string; value: unknown }
+    | { ok: false; error: string }
+  > {
+    const channel = BaseChannel.activeChannels.get(brainId);
+    if (!channel) {
+      return {
+        ok: false,
+        error: `no active channel for brain "${brainId}" (is it activated and daemon running?)`,
+      };
+    }
+    const displayName = channel.brain.brainbase.displayName;
+    logger.debug(`view ${thing}: "${displayName}" (${brainId})`);
+    return {
+      ok: true,
+      displayName,
+      value: await channel.readView(thing),
+    };
+  }
+
+  private async readView(thing: ViewThing): Promise<unknown> {
+    const now = new Date();
+    switch (thing) {
+      case "daily-schedule": {
+        const key = formatDateKey(now);
+        const stored = await this.brain.memory.get(`daily-schedule:${key}`);
+        if (!stored) return null;
+        try {
+          return { key, schedule: JSON.parse(stored.content) };
+        } catch {
+          return { key, raw: stored.content };
+        }
+      }
+      case "monthly-schedule": {
+        const key = formatMonthKey(now);
+        const stored = await this.brain.memory.get(`monthly-schedule:${key}`);
+        if (!stored) return null;
+        try {
+          return { key, schedule: JSON.parse(stored.content) };
+        } catch {
+          return { key, raw: stored.content };
+        }
+      }
+      case "sending-queue":
+        return this.isSendingQueue.map((m) => ({
+          sender: m.sender,
+          time: m.time.toISOString(),
+          content: m.content,
+        }));
+      case "deferred-queue":
+        return this.deferredQueue.map((m) => ({
+          sender: m.sender,
+          time: m.time.toISOString(),
+          content: m.content,
+        }));
+      case "today-availability":
+        return await this.brain.getTodayScheduledAvailability(now);
+    }
   }
 
   static async shutdownAll(): Promise<void> {
