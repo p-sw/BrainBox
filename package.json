@@ -1,8 +1,8 @@
 {
-  "name": "brainbox",
+  "name": "@p-sw/brainbox",
+  "version": "0.1.0",
   "module": "src/index.ts",
   "type": "module",
-  "private": true,
   "bin": {
     "brainbox": "./src/index.ts"
   },
@@ -30,5 +30,12 @@
     "supermemory": "^4.24.12",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
-  }
+  },
+  "author": {
+    "name": "Shinwoo PARK",
+    "email": "shinwoo.park@psw.kr",
+    "url": "https://psw.kr"
+  },
+  "description": "A persistent persona runtime for messenger bots.",
+  "homepage": "https://github.com/p-sw/BrainBox"
 }
