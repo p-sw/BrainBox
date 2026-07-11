@@ -54,10 +54,6 @@ import { configFile } from "../loader";
 export type AuthRecord = Record<string, string>;
 export type AuthFile = Record<string, AuthRecord>;
 
-// ponytail: .loose() lets each provider add fields (region, project, deployment,
-// endpoint, account) without us enumerating them in the schema. Writers only
-// touch string values, so we cast to z.ZodType<AuthFile> to keep the public
-// type tight while the YAML round-trip stays permissive.
 const AuthSchema = z.record(
   z.string(),
   z.object({ apiKey: z.string().default("") }).loose(),
@@ -65,8 +61,6 @@ const AuthSchema = z.record(
 
 const authCfg = configFile<AuthFile>("auth.yaml", { schema: AuthSchema });
 
-// ponytail: providers freely add apiKey + extras. .loose() on the schema keeps
-// the writer provider-agnostic — unknown fields round-trip through YAML as-is.
 export const PROVIDER_EXTRA_FIELDS: Record<string, string[]> = {
   "cloudflare-gateway": ["accountId", "gatewayId"],
   "cloudflare-workers": ["accountId"],

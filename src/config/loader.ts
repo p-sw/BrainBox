@@ -9,23 +9,15 @@ export const brainboxRoot = process.env["BRAINBOX_ROOT_PATH"]
   ? resolve(process.cwd(), process.env["BRAINBOX_ROOT_PATH"])
   : join(homedir(), ".brainbox");
 
-// ponytail: add a file → call configFile(name, schema) once and you get
-// { read, write, update, path }. New writes / new files become one line each.
-// ponytail: add a key  → add it + its default to the schema. That's it.
 export interface ConfigFile<T> {
-  /** Absolute path the file lives at. Resolved at call time. */
   path(): string;
-  /** Read + validate against the schema. Creates the file from defaults on first run. */
   read(): T;
-  /** Write a value (will be stringified as YAML). Creates parent dirs as needed. */
   write(value: T): void;
-  /** read → fn → write → return the new value. */
   update(fn: (current: T) => T): T;
 }
 
 export interface ConfigFileOptions<T> {
   schema: z.ZodType<T>;
-  /** Optional comment prepended to the file on first creation only. */
   header?: string;
 }
 
@@ -33,7 +25,6 @@ export function configFile<T>(
   file: string,
   options: ConfigFileOptions<T>,
 ): ConfigFile<T> {
-  // ponytail: defer path resolution — module-load snapshot freezes BRAINBOX_ROOT_PATH.
   const path = (): string => join(brainboxRoot, file);
   const read = (): T => {
     const p = path();
@@ -78,9 +69,6 @@ export function configFile<T>(
   return { path, read, write, update };
 }
 
-// ponytail: kept for the two call sites that don't need write access — the
-// module-load-time `config` snapshot still wants the parsed value, not a
-// handle to a lazy reader.
 export function parseConfigFile<T>(
   file: string,
   options: { header?: string; schema: z.ZodType<T> },

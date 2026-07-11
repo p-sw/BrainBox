@@ -16,9 +16,6 @@ import { register as onboard } from "@/commands/onboard";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// ponytail: one line to translate the user-facing `debug: true` flag in
-// brainbox.yaml into the logger's internal level. The level is the only thing
-// debug mode changes — no separate stream, no extra format.
 logger.configure({ level: config.debug ? "debug" : "info" });
 logger.debug(
   `brainbox starting (debug=${config.debug}, root=${config.brainboxRoot})`,
