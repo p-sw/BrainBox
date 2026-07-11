@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   LLMExecutor,
   defaultReasoningEffort,
+  parseModelJson,
   readAuthString,
   stripThinkTags,
   type CallOptions,
@@ -37,6 +38,9 @@ function toGeminiContents(
   messages: ChatMessages[],
 ): Array<{ role: string; parts: GeminiPart[] }> {
   const out: Array<{ role: string; parts: GeminiPart[] }> = [];
+  // Gemini functionResponse requires the tool name; ChatMessages only carry
+  // toolCallId on tool turns, so resolve name from the prior assistant call.
+  const nameByCallId = new Map<string, string>();
   for (const m of messages) {
     if (m.role === "system") continue; // system goes into systemInstruction
     if (m.role === "user") {
@@ -48,6 +52,7 @@ function toGeminiContents(
       if (m.content) parts.push({ text: m.content });
       if (m.toolCalls) {
         for (const c of m.toolCalls) {
+          nameByCallId.set(c.id, c.function.name);
           let args: Record<string, unknown> = {};
           try {
             args = c.function.arguments ? JSON.parse(c.function.arguments) : {};
@@ -67,11 +72,16 @@ function toGeminiContents(
       } catch {
         response = { result: m.content };
       }
-      // ponytail: We don't track the original tool name on tool messages; the
-      // caller names the response. The wire response uses an empty name.
       out.push({
         role: "user",
-        parts: [{ functionResponse: { name: "", response } }],
+        parts: [
+          {
+            functionResponse: {
+              name: nameByCallId.get(m.toolCallId) ?? "",
+              response,
+            },
+          },
+        ],
       });
     }
   }
@@ -201,7 +211,7 @@ export class VertexExecutor extends LLMExecutor {
     if (!text) {
       throw new Error("Empty response from model");
     }
-    return (jsonMode ? JSON.parse(text) : text) as T;
+    return (jsonMode ? parseModelJson(text) : text) as T;
   }
 
   async chatWithTools(
