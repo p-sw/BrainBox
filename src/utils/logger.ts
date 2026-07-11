@@ -48,34 +48,51 @@ export interface LoggerOptions {
   silent?: boolean;
 }
 
+// Process-wide sink: configure() and constructor options (except tag) apply to
+// every Logger, including children created before configure runs.
+const shared = {
+  level: "info" as LogLevel,
+  timestamps: true,
+  colors: chalk.level > 0,
+  file: undefined as string | undefined,
+  fileStream: undefined as WriteStream | undefined,
+  json: false,
+  silent: false,
+};
+
+function openFile(path: string | undefined): void {
+  if (path === shared.file) return;
+  shared.fileStream?.end();
+  shared.file = path;
+  if (path) {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    shared.fileStream = createWriteStream(path, { flags: "a" });
+  } else {
+    shared.fileStream = undefined;
+  }
+}
+
+function applyShared(options: Partial<LoggerOptions>): void {
+  if (options.level !== undefined) shared.level = options.level;
+  if (options.timestamps !== undefined) shared.timestamps = options.timestamps;
+  if (options.colors !== undefined) shared.colors = options.colors;
+  if (options.silent !== undefined) shared.silent = options.silent;
+  if (options.json !== undefined) shared.json = options.json;
+  // `file: undefined` must clear the sink — use `in` so Partial can disable it.
+  if ("file" in options) openFile(options.file);
+}
+
 class Logger {
-  private level: LogLevel;
-  private timestamps: boolean;
-  private colors: boolean;
   private tag?: string;
-  private file?: string;
-  private json: boolean;
-  private silent: boolean;
-  private fileStream?: WriteStream;
 
   constructor(options: LoggerOptions = {}) {
-    this.level = options.level ?? "info";
-    this.timestamps = options.timestamps ?? true;
-    this.colors = options.colors ?? chalk.level > 0;
     this.tag = options.tag;
-    this.file = options.file;
-    this.json = options.json ?? false;
-    this.silent = options.silent ?? false;
-
-    if (this.file) {
-      const dir = dirname(this.file);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      this.fileStream = createWriteStream(this.file, { flags: "a" });
-    }
+    applyShared(options);
   }
 
   private shouldLog(level: LogLevel): boolean {
-    return LEVELS[level].rank >= LEVELS[this.level].rank;
+    return LEVELS[level].rank >= LEVELS[shared.level].rank;
   }
 
   private formatTimestamp(): string {
@@ -88,7 +105,7 @@ class Logger {
     level: LogLevel,
     message: string,
   ): { console: string; file: string } {
-    const ts = this.timestamps ? `[${this.formatTimestamp()}]` : "";
+    const ts = shared.timestamps ? `[${this.formatTimestamp()}]` : "";
     const tag = this.tag ? `[${this.tag}]` : "";
     const icon = ICONS[level];
     const levelStr = level.toUpperCase();
@@ -96,7 +113,7 @@ class Logger {
     const consoleParts = [
       ts,
       tag,
-      this.colors ? LEVELS[level].color(icon) : icon,
+      shared.colors ? LEVELS[level].color(icon) : icon,
       message,
     ].filter(Boolean);
     const consoleLine = consoleParts.join(" ");
@@ -127,13 +144,13 @@ class Logger {
     );
     const jsonLine = this.formatJson(level, message);
 
-    if (!this.silent) {
+    if (!shared.silent) {
       const out = LEVELS[level].stderr ? process.stderr : process.stdout;
       out.write(consoleLine + "\n");
     }
 
-    if (this.fileStream) {
-      this.fileStream.write(this.json ? jsonLine : fileLine);
+    if (shared.fileStream) {
+      shared.fileStream.write(shared.json ? jsonLine : fileLine);
     }
   }
 
@@ -158,40 +175,19 @@ class Logger {
 
   child(tag: string): Logger {
     const combined = this.tag ? `${this.tag}:${tag}` : tag;
-    return new Logger({
-      level: this.level,
-      timestamps: this.timestamps,
-      colors: this.colors,
-      tag: combined,
-      file: this.file,
-      json: this.json,
-      silent: this.silent,
-    });
+    // Tag only — level/file/json live in shared and stay process-wide.
+    return new Logger({ tag: combined });
   }
 
   configure(options: Partial<LoggerOptions>) {
-    if (options.level !== undefined) this.level = options.level;
-    if (options.timestamps !== undefined) this.timestamps = options.timestamps;
-    if (options.colors !== undefined) this.colors = options.colors;
     if (options.tag !== undefined) this.tag = options.tag;
-    if (options.silent !== undefined) this.silent = options.silent;
-    if (options.json !== undefined) this.json = options.json;
-
-    if (options.file !== undefined && options.file !== this.file) {
-      this.fileStream?.end();
-      this.file = options.file;
-      if (this.file) {
-        const dir = dirname(this.file);
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        this.fileStream = createWriteStream(this.file, { flags: "a" });
-      } else {
-        this.fileStream = undefined;
-      }
-    }
+    applyShared(options);
   }
 
   close() {
-    this.fileStream?.end();
+    shared.fileStream?.end();
+    shared.fileStream = undefined;
+    shared.file = undefined;
   }
 }
 

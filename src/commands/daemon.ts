@@ -10,8 +10,10 @@ import { DiscordChannel } from "@/channel/discord";
 import { TelegramChannel } from "@/channel/telegram";
 import { logger } from "@/utils/logger";
 import { DAEMON_SOCKET_PATH } from "@/utils/daemonClient";
+import { config } from "@/config";
 import { createServer, type Socket } from "node:net";
 import { chmodSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { dispatch } from "./daemon/commands";
 
 import "./daemon/pairingCommand";
@@ -61,7 +63,9 @@ export async function startChannels(): Promise<number> {
 }
 
 export async function daemon(): Promise<void> {
-  logger.debug(`daemon: boot`);
+  const logFile = join(config.brainboxRoot, "brainbox.log");
+  logger.configure({ file: logFile });
+  logger.debug(`daemon: boot (log=${logFile})`);
   const started = await startChannels();
   if (started === 0) {
     logger.info("No activated brains with channels. Daemon idling.");
