@@ -13,6 +13,12 @@ import {
 
 const log = logger.child("llm:openai-compatible");
 
+// MiniMax (and similar) may wrap chain-of-thought in <think>…</think> inside
+// content. Strip before JSON.parse / persona text so structured calls work.
+export function stripThinkTags(content: string): string {
+  return content.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, "").trim();
+}
+
 // ponytail: Most LLM providers expose an OpenAI-compatible /v1/chat/completions endpoint.
 // One executor, parameterized by baseURL + auth headers, covers the majority of the list.
 // Per-provider tweaks live in subclass overrides; default behavior needs none.
@@ -84,7 +90,10 @@ function fromChoice(
   }));
   return {
     message: {
-      content: typeof msg.content === "string" ? msg.content : undefined,
+      content:
+        typeof msg.content === "string"
+          ? stripThinkTags(msg.content)
+          : undefined,
       toolCalls,
     },
   };
@@ -245,7 +254,8 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       reasoningEffort: reasoning,
     });
     const data = await this.sendRequest(body, options.reasoningEffort);
-    const content = data.choices?.[0]?.message?.content;
+    const raw = data.choices?.[0]?.message?.content;
+    const content = typeof raw === "string" ? stripThinkTags(raw) : raw;
     if (!content) {
       log.debug(`call: empty content in choice 0`);
       throw new Error("Empty response from model");
