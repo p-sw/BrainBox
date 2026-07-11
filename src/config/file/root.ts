@@ -33,5 +33,3 @@ export function setSupermemoryKey(key: string): RootConfig {
     supermemory: { ...root.supermemory, apiKey: key },
   }));
 }
-
-export default rootCfg.read();

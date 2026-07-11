@@ -96,4 +96,3 @@ export function removeProviderAuth(provider: string): AuthFile {
   });
 }
 
-export default authCfg.read();
