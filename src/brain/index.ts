@@ -168,7 +168,13 @@ export class Brain<BB extends BrainItem = BrainItem> {
       today.getMonth() + 1,
       today.getDate(),
     );
-    await this.createMonthlySchedule(nextMonth);
+    const monthly = await this.createMonthlySchedule(nextMonth);
+    if (!monthly) {
+      log.debug(
+        `regenerateSchedules: skip daily — monthly schedule generation failed`,
+      );
+      return;
+    }
 
     const tomorrow = new Date(
       today.getFullYear(),
