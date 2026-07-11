@@ -48,8 +48,10 @@ type ChatMessageWire =
 
 type ChatResponse = {
   choices?: Array<{
+    finish_reason?: string;
     message?: {
       content?: string | null;
+      reasoning_content?: string | null;
       tool_calls?: Array<{
         id: string;
         type: "function";
@@ -58,6 +60,8 @@ type ChatResponse = {
     };
   }>;
   error?: { message?: string; type?: string };
+  // MiniMax (and some CN hosts) return business errors here with HTTP 200.
+  base_resp?: { status_code?: number; status_msg?: string };
 };
 
 function toWireMessage(m: ChatMessages): ChatMessageWire {
@@ -235,6 +239,13 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
         `${this.providerName} API error: ${data.error.message ?? "unknown"}`,
       );
     }
+    // MiniMax returns business errors under base_resp with HTTP 200 and empty choices.
+    const baseCode = data.base_resp?.status_code;
+    if (typeof baseCode === "number" && baseCode !== 0) {
+      const msg = data.base_resp?.status_msg?.trim() || `status_code ${baseCode}`;
+      log.error(`${this.providerName}: base_resp ${baseCode} ${msg}`);
+      throw new Error(`${this.providerName} API error: ${msg}`);
+    }
     return data;
   }
 
@@ -264,11 +275,23 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       options.reasoningEffort,
       resolveLlmCaller(options),
     );
-    const raw = data.choices?.[0]?.message?.content;
+    const choice = data.choices?.[0];
+    const raw = choice?.message?.content;
     const content = typeof raw === "string" ? stripThinkTags(raw) : raw;
     if (!content) {
-      log.debug(`call: empty content in choice 0`);
-      throw new Error("Empty response from model");
+      const finish = choice?.finish_reason ?? "no-choice";
+      const reasoningLen =
+        typeof choice?.message?.reasoning_content === "string"
+          ? choice.message.reasoning_content.length
+          : 0;
+      log.debug(
+        `call: empty content in choice 0 finish_reason=${finish} reasoning_len=${reasoningLen} rawType=${raw === null ? "null" : typeof raw}`,
+      );
+      throw new Error(
+        reasoningLen > 0
+          ? `Empty response from model (finish_reason=${finish}; reasoning present but no content)`
+          : "Empty response from model",
+      );
     }
     log.debug(`call: response ${content.length} chars`);
     return (jsonMode ? parseModelJson(content) : content) as T;
