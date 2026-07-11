@@ -4,6 +4,7 @@ import {
   LLMExecutor,
   defaultReasoningEffort,
   readAuthString,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -77,15 +78,13 @@ function toGeminiContents(
   return out;
 }
 
-function toGeminiTool(t: ChatFunctionTool) {
+function toGeminiTools(tools: ChatFunctionTool[]) {
   return {
-    functionDeclarations: [
-      {
-        name: t.name,
-        description: t.description,
-        parameters: t.parameters ?? { type: "object", properties: {} },
-      },
-    ],
+    functionDeclarations: tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters ?? { type: "object", properties: {} },
+    })),
   };
 }
 
@@ -109,7 +108,10 @@ function extractFromGemini(data: GeminiResponse): {
       });
     }
   }
-  return { text, toolCalls: toolCalls.length > 0 ? toolCalls : undefined };
+  return {
+    text: stripThinkTags(text),
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+  };
 }
 
 export class VertexExecutor extends LLMExecutor {
@@ -215,9 +217,7 @@ export class VertexExecutor extends LLMExecutor {
       contents,
       systemInstruction: { parts: [{ text: options.instruction }] },
       tools:
-        options.tools.length > 0
-          ? [toGeminiTool(options.tools[0]!)]
-          : undefined,
+        options.tools.length > 0 ? [toGeminiTools(options.tools)] : undefined,
     };
     const data = await this.generate(model, body);
     if (data.error) {
