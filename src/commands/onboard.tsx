@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Box, Text, render } from "ink";
+import { Box, Text, render, type Instance } from "ink";
 import type { Command } from "commander";
 import chalk from "chalk";
-import { logger } from "@/utils/logger";
 import { TextInput } from "@/ui/TextInput";
 import { Select } from "@/ui/Select";
 import { listProviderNames } from "@/provider/llm";
@@ -14,6 +13,26 @@ import { Brain } from "@/brain";
 
 // ponytail: chain terminal screens by re-rendering inside one promise — same
 // pattern as model.tsx, keeps ink's stdin listeners sane (one raw-mode at a time).
+
+function ok(msg: string): void {
+  console.log(chalk.green(`✔ ${msg}`));
+}
+
+function info(msg: string): void {
+  console.log(msg);
+}
+
+/** Clear terminal, optional status line, then mount the next ink screen. */
+function show(
+  active: { current: Instance },
+  node: React.ReactElement,
+  status?: string,
+): void {
+  active.current.unmount();
+  console.clear();
+  if (status) ok(status);
+  active.current = render(node);
+}
 
 type ProviderStage =
   | { kind: "pick" }
@@ -73,7 +92,6 @@ function ProviderApp({
             const extras = PROVIDER_EXTRA_FIELDS[stage.provider] ?? [];
             if (extras.length === 0) {
               setProviderAuth(stage.provider, { apiKey });
-              logger.success(`Saved ${stage.provider} to auth.yaml`);
               onDone({ provider: stage.provider });
               return;
             }
@@ -91,13 +109,8 @@ function ProviderApp({
     );
   }
 
-  // extras
-  const nextField = stage.fields[0];
-  if (!nextField) {
-    setProviderAuth(stage.provider, stage.values);
-    logger.success(`Saved ${stage.provider} to auth.yaml`);
-    return <Text>Continuing…</Text>;
-  }
+  // extras — complete in onSubmit so we never side-effect during render
+  const nextField = stage.fields[0]!;
   return (
     <Box flexDirection="column">
       <Text>
@@ -111,6 +124,11 @@ function ProviderApp({
           const remaining = stage.fields.slice(1);
           const values: Record<string, string> = { ...stage.values };
           if (value) values[nextField] = value;
+          if (remaining.length === 0) {
+            setProviderAuth(stage.provider, values);
+            onDone({ provider: stage.provider });
+            return;
+          }
           setStage({
             kind: "extras",
             provider: stage.provider,
@@ -128,7 +146,7 @@ function ModelApp({
   onDone,
 }: {
   provider: string;
-  onDone: () => void;
+  onDone: (model: string) => void;
 }): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   return (
@@ -152,8 +170,7 @@ function ModelApp({
           }
           setModelSlot("identity", value);
           setModelSlot("conversation", value);
-          logger.success(`Set identity + conversation model to ${value}`);
-          onDone();
+          onDone(value);
         }}
       />
       {error && <Text color="red">{error}</Text>}
@@ -183,7 +200,6 @@ function SuperMemoryApp({
             return;
           }
           setSupermemoryKey(key);
-          logger.success("Saved supermemory key to brainbox.yaml");
           onDone();
         }}
       />
@@ -201,6 +217,7 @@ function BrainApp({
     { kind: "name" } | { kind: "seed"; displayName: string }
   >({ kind: "name" });
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   if (stage.kind === "name") {
     return (
@@ -233,34 +250,39 @@ function BrainApp({
       <Text dimColor>
         One sentence about who they are. The model will expand it.
       </Text>
-      <TextInput
-        prompt="seed> "
-        onSubmit={async (raw) => {
-          const seed = raw.trim();
-          if (seed === "skip") {
-            logger.info("Skipped brain creation.");
-            onDone({ brainId: "", displayName: stage.displayName });
-            return;
-          }
-          if (!seed) {
-            setError("Seed cannot be empty (or type 'skip')");
-            return;
-          }
-          const result = await Brain.create(stage.displayName, seed);
-          if (!result) {
-            setError(
-              "Brain creation failed (check logs above, or type 'skip')",
-            );
-            return;
-          }
-          logger.success(
-            `Created brain "${stage.displayName}" (${chalk.cyan(
-              result.brainId,
-            )})`,
-          );
-          onDone({ brainId: result.brainId, displayName: stage.displayName });
-        }}
-      />
+      {busy ? (
+        <Text dimColor>Creating brain…</Text>
+      ) : (
+        <TextInput
+          prompt="seed> "
+          onSubmit={(raw) => {
+            const seed = raw.trim();
+            if (seed === "skip") {
+              onDone({ brainId: "", displayName: stage.displayName });
+              return;
+            }
+            if (!seed) {
+              setError("Seed cannot be empty (or type 'skip')");
+              return;
+            }
+            setBusy(true);
+            setError(null);
+            void Brain.create(stage.displayName, seed).then((result) => {
+              setBusy(false);
+              if ("error" in result) {
+                setError(
+                  `Brain creation failed: ${result.error} (fix seed, or type 'skip')`,
+                );
+                return;
+              }
+              onDone({
+                brainId: result.brainId,
+                displayName: stage.displayName,
+              });
+            });
+          }}
+        />
+      )}
       {error && <Text color="red">{error}</Text>}
     </Box>
   );
@@ -282,7 +304,7 @@ function ChannelApp({
 }: {
   brainId: string;
   displayName: string;
-  onDone: () => void;
+  onDone: (status: string) => void;
 }): React.ReactElement {
   const [stage, setStage] = useState<ChannelStage>({ kind: "kind" });
   const [error, setError] = useState<string | null>(null);
@@ -300,8 +322,7 @@ function ChannelApp({
           items={["discord", "telegram", "skip"]}
           onSelect={(v) => {
             if (v === "skip") {
-              logger.info("Skipped channel setup.");
-              onDone();
+              onDone("Skipped channel setup.");
               return;
             }
             setError(null);
@@ -346,41 +367,45 @@ function ChannelApp({
       </Text>
       <TextInput
         prompt={`${stage.kind_ === "discord" ? "channelId" : "chatId"}> `}
-        onSubmit={async (raw) => {
+        onSubmit={(raw) => {
           const target = raw.trim();
-          const existing = await brainManager.loadBrain(brainId);
-          if (!existing) {
-            setError(`Brain ${brainId} no longer exists`);
-            return;
-          }
-          let updated;
-          if (stage.kind_ === "discord") {
-            updated = {
-              ...existing,
-              channel: "discord" as const,
-              discord: { token: stage.token, channelId: target || undefined },
-              activated: true,
-            };
-          } else {
-            const chatId = target ? Number(target) : undefined;
-            if (target && Number.isNaN(chatId)) {
-              setError("chatId must be a number");
+          void (async () => {
+            const existing = await brainManager.loadBrain(brainId);
+            if (!existing) {
+              setError(`Brain ${brainId} no longer exists`);
               return;
             }
-            updated = {
-              ...existing,
-              channel: "telegram" as const,
-              telegram: { token: stage.token, chatId },
-              activated: true,
-            };
-          }
-          await brainManager.saveBrain(brainId, updated);
-          logger.success(
-            `Bound ${displayName} → ${stage.kind_}${
-              target ? ` (${target})` : " (pairing mode)"
-            }`,
-          );
-          onDone();
+            let updated;
+            if (stage.kind_ === "discord") {
+              updated = {
+                ...existing,
+                channel: "discord" as const,
+                discord: {
+                  token: stage.token,
+                  channelId: target || undefined,
+                },
+                activated: true,
+              };
+            } else {
+              const chatId = target ? Number(target) : undefined;
+              if (target && Number.isNaN(chatId)) {
+                setError("chatId must be a number");
+                return;
+              }
+              updated = {
+                ...existing,
+                channel: "telegram" as const,
+                telegram: { token: stage.token, chatId },
+                activated: true,
+              };
+            }
+            await brainManager.saveBrain(brainId, updated);
+            onDone(
+              `Bound ${displayName} → ${stage.kind_}${
+                target ? ` (${target})` : " (pairing mode)"
+              }`,
+            );
+          })();
         }}
       />
       {error && <Text color="red">{error}</Text>}
@@ -389,7 +414,8 @@ function ChannelApp({
 }
 
 async function runOnboard(): Promise<void> {
-  logger.info(`Welcome — let's get ${chalk.bold("brainbox")} ready.`);
+  console.clear();
+  info(`Welcome — let's get ${chalk.bold("brainbox")} ready.`);
 
   const providers = listProviderNames().slice().sort();
   const { promise, resolve } = Promise.withResolvers<void>();
@@ -398,46 +424,58 @@ async function runOnboard(): Promise<void> {
   // at a time keeps ink's stdin listeners sane (same pattern as model.tsx).
   // Only the LAST screen resolves — waitUntilExit would race with chained
   // re-renders and resolve after the first screen's unmount.
-  let active = render(
+  const active = { current: null as unknown as Instance };
+
+  active.current = render(
     <ProviderApp
       providers={providers}
       onDone={(p) => {
-        active.unmount();
-        active = render(
+        show(
+          active,
           <ModelApp
             provider={p.provider}
-            onDone={() => {
-              active.unmount();
-              active = render(
+            onDone={(model) => {
+              show(
+                active,
                 <SuperMemoryApp
                   onDone={() => {
-                    active.unmount();
-                    active = render(
+                    show(
+                      active,
                       <BrainApp
                         onDone={(b) => {
-                          active.unmount();
                           if (!b.brainId) {
+                            active.current.unmount();
+                            console.clear();
+                            info("Skipped brain creation.");
                             resolve();
                             return;
                           }
-                          active = render(
+                          show(
+                            active,
                             <ChannelApp
                               brainId={b.brainId}
                               displayName={b.displayName}
-                              onDone={() => {
-                                active.unmount();
+                              onDone={(status) => {
+                                active.current.unmount();
+                                console.clear();
+                                if (status.startsWith("Skipped")) info(status);
+                                else ok(status);
                                 resolve();
                               }}
                             />,
+                            `Created brain "${b.displayName}" (${chalk.cyan(b.brainId)})`,
                           );
                         }}
                       />,
+                      "Saved supermemory key to brainbox.yaml",
                     );
                   }}
                 />,
+                `Set identity + conversation model to ${model}`,
               );
             }}
           />,
+          `Saved ${p.provider} to auth.yaml`,
         );
       }}
     />,
@@ -445,8 +483,8 @@ async function runOnboard(): Promise<void> {
 
   await promise;
 
-  logger.success("Onboarding complete.");
-  logger.info(`Run ${chalk.cyan("brainbox daemon")} to bring it online.`);
+  ok("Onboarding complete.");
+  info(`Run ${chalk.cyan("brainbox daemon")} to bring it online.`);
 }
 
 export function register(program: Command): Command {
