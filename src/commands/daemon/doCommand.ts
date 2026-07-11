@@ -17,7 +17,7 @@ defineCommand<{ action: string; brainId: string }>({
     if (typeof brainId !== "string" || brainId.trim().length === 0) {
       return { ok: false, error: "missing brainId" };
     }
-    const result = await BaseChannel.forceDo(brainId.trim(), action as DoAction);
+    const result = BaseChannel.forceDo(brainId.trim(), action as DoAction);
     if (!result.ok) return result;
     return {
       ok: true,

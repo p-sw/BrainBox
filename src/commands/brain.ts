@@ -111,7 +111,9 @@ export async function doAction(action: string, brainId: string): Promise<void> {
     args: { action, brainId },
   });
   const name = response.result?.displayName ?? brainId;
-  logger.success(`Forced ${action} for "${name}" (${brainId}).`);
+  logger.success(
+    `Successfully sent ${action} for "${name}" (${brainId}).`,
+  );
 }
 
 export async function viewThing(thing: string, brainId: string): Promise<void> {

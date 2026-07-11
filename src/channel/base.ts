@@ -426,11 +426,11 @@ export abstract class BaseChannel<
     return Array.from(BaseChannel.activeChannels.values());
   }
 
-  /** Force-run a cron job for a live brain channel (bypasses cron guards). */
-  static async forceDo(
+  /** Kick off a cron job for a live brain; returns once accepted, not when done. */
+  static forceDo(
     brainId: string,
     action: DoAction,
-  ): Promise<{ ok: true; displayName: string } | { ok: false; error: string }> {
+  ): { ok: true; displayName: string } | { ok: false; error: string } {
     const channel = BaseChannel.activeChannels.get(brainId);
     if (!channel) {
       return {
@@ -439,12 +439,22 @@ export abstract class BaseChannel<
       };
     }
     const displayName = channel.brain.brainbase.displayName;
-    logger.info(`do ${action}: forcing for "${displayName}" (${brainId})`);
-    if (action === "generateSchedule") {
-      await channel.regenerateSchedules();
-    } else {
-      await channel.runSleepMemory(true);
-    }
+    logger.info(`do ${action}: queued for "${displayName}" (${brainId})`);
+    void (async () => {
+      try {
+        if (action === "generateSchedule") {
+          await channel.regenerateSchedules();
+        } else {
+          await channel.runSleepMemory(true);
+        }
+        logger.success(`do ${action}: done for "${displayName}" (${brainId})`);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        logger.error(
+          `do ${action}: failed for "${displayName}" (${brainId}): ${reason}`,
+        );
+      }
+    })();
     return { ok: true, displayName };
   }
 
