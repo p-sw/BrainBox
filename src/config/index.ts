@@ -15,7 +15,9 @@ export interface Config {
 // to Brain.create / LLMExecutor.init instead of the empty import-time snapshot.
 export const config: Config = {
   get debug() {
-    return readRootFile().debug;
+    return process.env.DEBUG_MODE
+      ? process.env.DEBUG_MODE.toLowerCase() === "true"
+      : readRootFile().debug;
   },
   brainboxRoot,
   get supermemoryApiKey() {
