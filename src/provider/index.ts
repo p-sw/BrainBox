@@ -119,4 +119,14 @@ register("copilot", CopilotExecutor);
 register("gitlab-duo", GitLabDuoExecutor);
 register("snowflake-cortex", SnowflakeCortexExecutor);
 
-export const llm = LLMExecutor.init();
+// ponytail: lazy so bare `brainbox` (help/version) works without model config
+let _llm: LLMExecutor | undefined;
+export const llm: LLMExecutor = new Proxy({} as LLMExecutor, {
+  get(_t, prop) {
+    _llm ??= LLMExecutor.init();
+    const v = Reflect.get(_llm, prop, _llm);
+    return typeof v === "function"
+      ? (v as (...a: unknown[]) => unknown).bind(_llm)
+      : v;
+  },
+});
