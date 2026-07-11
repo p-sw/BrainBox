@@ -34,6 +34,9 @@
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "author": {
     "name": "Shinwoo PARK",
     "email": "shinwoo.park@psw.kr",
