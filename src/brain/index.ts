@@ -47,12 +47,14 @@ export interface BrainCreateResult {
 export class Brain<BB extends BrainItem = BrainItem> {
   private availabilityCache: Map<string, AvailabilityWindows> = new Map();
 
+  public memory: Memory;
   constructor(
     private db: Supermemory,
     private space: Space,
     public brainbase: BB,
-    public memory: Memory = new Memory(this.db, this.space),
+    memory?: Memory,
   ) {
+    this.memory = memory ?? new Memory(this.db, this.space);
     log.debug(
       `Brain constructed: id=${brainbase.brainId} name=${brainbase.displayName} space=${space.name}`,
     );
