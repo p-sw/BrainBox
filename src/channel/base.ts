@@ -189,9 +189,9 @@ export abstract class BaseChannel<
   }
 
   protected getRegisteredCrons() {
-    return scheduledJobs
-      .filter((c) => c.name && c.name.startsWith(this.resolveCronPrefix()))
-      .map((c) => c.name as string);
+    return scheduledJobs.filter(
+      (c) => c.name && c.name.startsWith(this.resolveCronPrefix()),
+    );
   }
 
   protected pauseCron(key: string) {
@@ -418,8 +418,8 @@ export abstract class BaseChannel<
   }
 
   protected stopOwnCrons(): void {
-    for (const key of this.getRegisteredCrons()) {
-      this.removeCron(key);
+    for (const cron of this.getRegisteredCrons()) {
+      cron.stop();
     }
   }
 
