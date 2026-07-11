@@ -15,10 +15,13 @@ const SLEEP_MEMORY_CRON_KEY = "__sleep-memory__";
 const SLEEP_MEMORY_CRON_PATTERN = "0 * * * *"; // every 1 hour
 const START_CONVERSATION_CRON_KEY = "__start-conversation__";
 const START_CONVERSATION_CRON_PATTERN = "*/10 * * * *"; // every 10 min
-const DAILY_SCHEDULE_CRON_KEY = "__daily-schedule__";
-const DAILY_SCHEDULE_CRON_PATTERN = "0 0 * * *"; // every day at 00:00
-const DAILY_SCHEDULE_NOON_CRON_KEY = "__daily-schedule-noon__";
-const DAILY_SCHEDULE_NOON_CRON_PATTERN = "0 12 * * *"; // every day at 12:00 (backup tick)
+const SCHEDULE_CRON_KEY = "__schedule__";
+const SCHEDULE_CRON_PATTERN = "0 0 * * *"; // every day at 00:00
+const SCHEDULE_NOON_CRON_KEY = "__schedule-noon__";
+const SCHEDULE_NOON_CRON_PATTERN = "0 12 * * *"; // every day at 12:00 (backup tick)
+
+export const DO_ACTIONS = ["generateSchedule", "sleepMemory"] as const;
+export type DoAction = (typeof DO_ACTIONS)[number];
 
 export interface PairingInbound {
   content: string;
@@ -64,39 +67,16 @@ export abstract class BaseChannel<
     this.registerCron(
       SLEEP_MEMORY_CRON_KEY,
       SLEEP_MEMORY_CRON_PATTERN,
-      async () => {
-        const dateKey = formatDateKey(new Date());
-        const availability = await this.brain.getAvailability();
-        if (availability.status !== "offline") {
-          logger.debug(
-            `sleepMemory cron: skip — availability=${availability.status}`,
-          );
-          return;
-        }
-        const existing = await this.brain.memory.get(
-          `daily-journal:${dateKey}`,
-        );
-        if (existing) {
-          logger.debug(
-            `sleepMemory cron: skip — journal for ${dateKey} exists`,
-          );
-          return;
-        }
-        const history = await this.getMessageHistoryBetween(
-          new Date(Date.now() - 24 * 60 * 60 * 1000),
-          new Date(),
-        );
-        await this.brain.sleepMemory(new Date(), history);
-      },
+      () => this.runSleepMemory(),
     );
     this.registerCron(
-      DAILY_SCHEDULE_CRON_KEY,
-      DAILY_SCHEDULE_CRON_PATTERN,
+      SCHEDULE_CRON_KEY,
+      SCHEDULE_CRON_PATTERN,
       () => this.regenerateSchedules(),
     );
     this.registerCron(
-      DAILY_SCHEDULE_NOON_CRON_KEY,
-      DAILY_SCHEDULE_NOON_CRON_PATTERN,
+      SCHEDULE_NOON_CRON_KEY,
+      SCHEDULE_NOON_CRON_PATTERN,
       () => this.regenerateSchedules(),
     );
     this.registerCron(
@@ -104,6 +84,29 @@ export abstract class BaseChannel<
       START_CONVERSATION_CRON_PATTERN,
       () => this.runStartConversation(),
     );
+  }
+
+  private async runSleepMemory(force = false): Promise<void> {
+    const dateKey = formatDateKey(new Date());
+    if (!force) {
+      const availability = await this.brain.getAvailability();
+      if (availability.status !== "offline") {
+        logger.debug(
+          `sleepMemory cron: skip — availability=${availability.status}`,
+        );
+        return;
+      }
+      const existing = await this.brain.memory.get(`daily-journal:${dateKey}`);
+      if (existing) {
+        logger.debug(`sleepMemory cron: skip — journal for ${dateKey} exists`);
+        return;
+      }
+    }
+    const history = await this.getMessageHistoryBetween(
+      new Date(Date.now() - 24 * 60 * 60 * 1000),
+      new Date(),
+    );
+    await this.brain.sleepMemory(new Date(), history);
   }
 
   private async regenerateSchedules(): Promise<void> {
@@ -412,6 +415,28 @@ export abstract class BaseChannel<
 
   static all(): readonly BaseChannel[] {
     return Array.from(BaseChannel.activeChannels.values());
+  }
+
+  /** Force-run a cron job for a live brain channel (bypasses cron guards). */
+  static async forceDo(
+    brainId: string,
+    action: DoAction,
+  ): Promise<{ ok: true; displayName: string } | { ok: false; error: string }> {
+    const channel = BaseChannel.activeChannels.get(brainId);
+    if (!channel) {
+      return {
+        ok: false,
+        error: `no active channel for brain "${brainId}" (is it activated and daemon running?)`,
+      };
+    }
+    const displayName = channel.brain.brainbase.displayName;
+    logger.info(`do ${action}: forcing for "${displayName}" (${brainId})`);
+    if (action === "generateSchedule") {
+      await channel.regenerateSchedules();
+    } else {
+      await channel.runSleepMemory(true);
+    }
+    return { ok: true, displayName };
   }
 
   static async shutdownAll(): Promise<void> {

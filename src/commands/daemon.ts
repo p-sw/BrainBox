@@ -18,6 +18,7 @@ import { dispatch } from "./daemon/commands";
 
 import "./daemon/pairingCommand";
 import "./daemon/restartCommand";
+import "./daemon/doCommand";
 
 export async function startChannels(): Promise<number> {
   const items = await brainManager.listAvailableBrain();

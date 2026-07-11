@@ -4,6 +4,8 @@ import { registerCommand } from "@/commands";
 import { brainManager } from "@/brain/manager";
 import { Brain } from "@/brain";
 import { logger } from "@/utils/logger";
+import { sendToDaemon, type DaemonResponse } from "@/utils/daemonClient";
+import { DO_ACTIONS, type DoAction } from "@/channel/base";
 
 export async function listBrains(): Promise<void> {
   const brains = await brainManager.listBrains();
@@ -93,6 +95,25 @@ export async function removeBrain(brainId: string): Promise<void> {
   );
 }
 
+export async function doAction(action: string, brainId: string): Promise<void> {
+  if (!DO_ACTIONS.includes(action as DoAction)) {
+    logger.error(
+      `Unknown action "${action}". Expected one of: ${DO_ACTIONS.join(", ")}`,
+    );
+    process.exit(1);
+  }
+  logger.debug(`do: action=${action} brainId=${brainId}`);
+  // ponytail: sendToDaemon logs and process.exit(1)s on any failure.
+  const response = await sendToDaemon<
+    DaemonResponse<{ action: string; brainId: string; displayName: string }>
+  >({
+    command: "do",
+    args: { action, brainId },
+  });
+  const name = response.result?.displayName ?? brainId;
+  logger.success(`Forced ${action} for "${name}" (${brainId}).`);
+}
+
 export function register(program: Command): Command {
   const cmd = registerCommand(program, {
     name: "brain",
@@ -116,5 +137,11 @@ export function register(program: Command): Command {
     .command("deactivate <brainId>")
     .description("Deactivate a brain")
     .action(deactivateBrain);
+  cmd
+    .command("do <action> <brainId>")
+    .description(
+      `Force-run a daemon job (${DO_ACTIONS.join(" | ")}) for a live brain`,
+    )
+    .action(doAction);
   return cmd;
 }
