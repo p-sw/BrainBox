@@ -4,6 +4,7 @@ import {
   LLMExecutor,
   defaultReasoningEffort,
   readAuthString,
+  stripThinkTags,
   type CallOptions,
   type ChatChoice,
   type ChatFunctionTool,
@@ -167,16 +168,20 @@ export class AnthropicExecutor extends LLMExecutor {
     log.debug(
       `call: model=${model} jsonSchema=${jsonMode ? options.jsonSchemaName : "-"} msgLen=${options.message.length}`,
     );
+    const outputCap = 4096;
     const body: Record<string, unknown> = {
       model,
-      max_tokens: 4096,
+      max_tokens: outputCap,
       system: options.instruction,
       messages: [{ role: "user", content: options.message }],
     };
     if (reasoning !== "none") {
+      const budget = REASONING_BUDGET[reasoning];
+      // Anthropic requires budget_tokens < max_tokens
+      body["max_tokens"] = budget + outputCap;
       body["thinking"] = {
         type: "enabled",
-        budget_tokens: REASONING_BUDGET[reasoning],
+        budget_tokens: budget,
       };
     }
     const data = await this.send(body);
@@ -185,10 +190,12 @@ export class AnthropicExecutor extends LLMExecutor {
         `anthropic API error: ${data.error.message ?? "unknown"}`,
       );
     }
-    const text = (data.content ?? [])
-      .filter((b): b is { type: "text"; text: string } => b.type === "text")
-      .map((b) => b.text)
-      .join("");
+    const text = stripThinkTags(
+      (data.content ?? [])
+        .filter((b): b is { type: "text"; text: string } => b.type === "text")
+        .map((b) => b.text)
+        .join(""),
+    );
     if (!text) {
       throw new Error("Empty response from model");
     }
@@ -209,17 +216,20 @@ export class AnthropicExecutor extends LLMExecutor {
       `chatWithTools: model=${model} msgs=${options.messages.length} tools=${options.tools.length}`,
     );
     const { system, msgs } = toAnthropicMessages(options.messages);
+    const outputCap = 4096;
     const body: Record<string, unknown> = {
       model,
-      max_tokens: 4096,
+      max_tokens: outputCap,
       system: system ?? options.instruction,
       messages: msgs,
       tools: options.tools.map(toAnthropicTool),
     };
     if (reasoning !== "none") {
+      const budget = REASONING_BUDGET[reasoning];
+      body["max_tokens"] = budget + outputCap;
       body["thinking"] = {
         type: "enabled",
-        budget_tokens: REASONING_BUDGET[reasoning],
+        budget_tokens: budget,
       };
     }
     const data = await this.send(body);
@@ -229,10 +239,12 @@ export class AnthropicExecutor extends LLMExecutor {
       );
     }
     const blocks = data.content ?? [];
-    const text = blocks
-      .filter((b): b is { type: "text"; text: string } => b.type === "text")
-      .map((b) => b.text)
-      .join("");
+    const text = stripThinkTags(
+      blocks
+        .filter((b): b is { type: "text"; text: string } => b.type === "text")
+        .map((b) => b.text)
+        .join(""),
+    );
     const toolCalls: ToolCall[] | undefined = blocks
       .filter(
         (
