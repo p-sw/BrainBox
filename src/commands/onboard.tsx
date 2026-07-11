@@ -251,7 +251,11 @@ function BrainApp({
         One sentence about who they are. The model will expand it.
       </Text>
       {busy ? (
-        <Text dimColor>Creating brain…</Text>
+        <Text dimColor>
+          {
+            "Creating brain… (This can take few minutes depending on the model's response speed)"
+          }
+        </Text>
       ) : (
         <TextInput
           prompt="seed> "
