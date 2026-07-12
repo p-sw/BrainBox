@@ -33,6 +33,8 @@ export const VIEW_THINGS = [
   "sending-queue",
   "deferred-queue",
   "today-availability",
+  "persona",
+  "base-system-prompt",
 ] as const;
 export type ViewThing = (typeof VIEW_THINGS)[number];
 
@@ -524,6 +526,12 @@ export abstract class BaseChannel<
         }));
       case "today-availability":
         return await this.brain.getTodayScheduledAvailability(now);
+      case "persona": {
+        const stored = await this.brain.memory.get("persona");
+        return stored?.content ?? null;
+      }
+      case "base-system-prompt":
+        return this.brain.brainbase.baseSystemPrompt;
     }
   }
 
