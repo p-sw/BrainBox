@@ -18,6 +18,8 @@ export interface BrainItem {
   brainId: string;
   spaceName: string;
   displayName: string;
+  /** Primary chat language (e.g. "English", "Korean"). Missing on older brains. */
+  language?: string;
   baseSystemPrompt: string;
   dndReplyProbability: number;
   startConversationCountThreshold: number;

@@ -505,12 +505,14 @@ export class Brain<BB extends BrainItem = BrainItem> {
     const scheduleBlock = await this.buildScheduleBlock(now);
     const datetimeBlock = formatDatetime(now);
 
+    const language = this.brainbase.language?.trim() || "English";
     const instruction = initiate
       ? await loadPrompt("START_CONVERSATION")
       : await loadPrompt("SEND_MESSAGE");
     const userPrompt = initiate
       ? [
           `Current date and time: ${datetimeBlock}`,
+          `Language: ${language}`,
           scheduleBlock,
           memoryBlock,
           `Conversation so far:`,
@@ -519,6 +521,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
         ].join("\n\n")
       : [
           `Current date and time: ${datetimeBlock}`,
+          `Language: ${language}`,
           scheduleBlock,
           memoryBlock,
           `Conversation so far:`,
@@ -537,7 +540,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
     try {
       await llm.chatWithToolExecution(llm.models.conversation, {
         caller: initiate ? "start-conversation" : "send-message",
-        instruction: `${this.brainbase.baseSystemPrompt}\n\n${instruction}`,
+        instruction: `${this.brainbase.baseSystemPrompt}\n\nLanguage: always reply in ${language}.\n\n${instruction}`,
         messages,
         tools,
         maxSteps,
@@ -722,15 +725,19 @@ export class Brain<BB extends BrainItem = BrainItem> {
   static async create(
     displayName: string,
     seed: string,
+    options: { language?: string } = {},
   ): Promise<{ brainId: string; brain: Brain } | { error: string }> {
-    log.debug(`Brain.create: starting name="${displayName}"`);
+    const language = (options.language ?? "English").trim() || "English";
+    log.debug(
+      `Brain.create: starting name="${displayName}" language="${language}"`,
+    );
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
       log.debug(`Brain.create: generating description`);
       const description = await llm.call<string>(llm.models.identity, {
         caller: "persona-init",
         instruction: personaInitInstruction,
-        message: seed,
+        message: [`Language: ${language}`, `Seed:`, seed].join("\n\n"),
       });
       log.debug(
         `Brain.create: description returned (${description.length} chars)`,
@@ -745,7 +752,11 @@ export class Brain<BB extends BrainItem = BrainItem> {
         {
           caller: "base-system-prompt",
           instruction: personaSystemInstruction,
-          message: description,
+          message: [
+            `Language: ${language}`,
+            `Biography:`,
+            description,
+          ].join("\n\n"),
           jsonSchemaName: "base-system-prompt",
           jsonSchema: baseSystemPromptSchema,
         },
@@ -770,6 +781,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
         brainId,
         spaceName: space.name,
         displayName,
+        language,
         baseSystemPrompt,
         dndReplyProbability: generated.dndReplyProbability,
         startConversationCountThreshold:

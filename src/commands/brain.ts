@@ -54,12 +54,13 @@ export async function deactivateBrain(brainId: string): Promise<void> {
 export async function createBrain(
   displayName: string,
   seed: string,
-  options: { schedule: boolean },
+  options: { schedule: boolean; language: string },
 ): Promise<void> {
+  const language = options.language?.trim() || "English";
   logger.debug(
-    `createBrain: name="${displayName}" seed length=${seed.length} schedule=${options.schedule}`,
+    `createBrain: name="${displayName}" language="${language}" seed length=${seed.length} schedule=${options.schedule}`,
   );
-  const result = await Brain.create(displayName, seed);
+  const result = await Brain.create(displayName, seed, { language });
   if ("error" in result) {
     logger.error(`Failed to create brain "${displayName}": ${result.error}`);
     process.exitCode = 1;
@@ -68,11 +69,11 @@ export async function createBrain(
   if (options.schedule) {
     await result.brain.regenerateSchedules();
     logger.success(
-      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) with initial schedule`,
+      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) [${language}] with initial schedule`,
     );
   } else {
     logger.success(
-      `Created brain "${displayName}" (${chalk.cyan(result.brainId)})`,
+      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) [${language}]`,
     );
   }
 }
@@ -151,6 +152,11 @@ export function register(program: Command): Command {
     .command("create <name> [seed]")
     .description("Create a new brain from a free-form seed")
     .option("--no-schedule", "Skip generating the initial schedule")
+    .option(
+      "-l, --language <language>",
+      "Primary chat language for the persona",
+      "English",
+    )
     .action(createBrain);
   cmd
     .command("remove <brainId>")

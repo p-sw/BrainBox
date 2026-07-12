@@ -218,7 +218,9 @@ function BrainApp({
   onDone: (ctx: { brainId: string; displayName: string }) => void;
 }): React.ReactElement {
   const [stage, setStage] = useState<
-    { kind: "name" } | { kind: "seed"; displayName: string }
+    | { kind: "name" }
+    | { kind: "language"; displayName: string }
+    | { kind: "seed"; displayName: string; language: string }
   >({ kind: "name" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -237,7 +239,34 @@ function BrainApp({
               return;
             }
             setError(null);
-            setStage({ kind: "seed", displayName: v });
+            setStage({ kind: "language", displayName: v });
+          }}
+        />
+        {error && <Text color="red">{error}</Text>}
+      </Box>
+    );
+  }
+
+  if (stage.kind === "language") {
+    return (
+      <Box flexDirection="column">
+        <Text>
+          {chalk.bold("Step 3/4")} — Language for{" "}
+          <Text color="cyan">{stage.displayName}</Text>
+        </Text>
+        <Text dimColor>
+          Primary chat language (English, Korean, 日本語, …). Empty = English.
+        </Text>
+        <TextInput
+          prompt="language> "
+          onSubmit={(raw) => {
+            const language = raw.trim() || "English";
+            setError(null);
+            setStage({
+              kind: "seed",
+              displayName: stage.displayName,
+              language,
+            });
           }}
         />
         {error && <Text color="red">{error}</Text>}
@@ -249,7 +278,8 @@ function BrainApp({
     <Box flexDirection="column">
       <Text>
         {chalk.bold("Step 3/4")} — Seed for{" "}
-        <Text color="cyan">{stage.displayName}</Text>
+        <Text color="cyan">{stage.displayName}</Text>{" "}
+        <Text dimColor>({stage.language})</Text>
       </Text>
       <Text dimColor>
         One sentence about who they are. The model will expand it.
@@ -275,7 +305,9 @@ function BrainApp({
             }
             setBusy(true);
             setError(null);
-            void Brain.create(stage.displayName, seed).then((result) => {
+            void Brain.create(stage.displayName, seed, {
+              language: stage.language,
+            }).then((result) => {
               setBusy(false);
               if ("error" in result) {
                 setError(
