@@ -10,7 +10,7 @@
   "scripts": {
     "cli": "bun run src/index.ts",
     "format": "bun run prettier 'src/**/*.ts' -w",
-    "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target node --packages external && cp -r prompts dist/prompts && chmod +x dist/index.js",
+    "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target bun --packages external && sed -i '1s|#!/usr/bin/env node|#!/usr/bin/env bun|' dist/index.js && cp -r prompts dist/prompts && chmod +x dist/index.js",
     "prepack": "bun run build"
   },
   "devDependencies": {
