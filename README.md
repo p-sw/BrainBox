@@ -22,6 +22,9 @@ Then she runs on a Discord or Telegram account. She greets you. She replies when
 
 ### Getting started
 
+
+> **Requires [Bun](https://bun.sh).** Channel message history uses `bun:sqlite`, so run BrainBox with Bun (`bun install`, `bun run …`, or install the CLI under Bun). Node alone is not enough.
+
 **1. Install**
 
 ```
