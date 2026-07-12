@@ -9,6 +9,7 @@ export {
   type ChatFunctionTool,
   type ChatMessages,
   type ChatWithToolsOptions,
+  type ChatWithToolExecutionOptions,
   type ProviderCtor,
   type ReasoningEffort,
   type ToolCall,

@@ -19,12 +19,7 @@ import { logger } from "@/utils/logger";
 import { BadRequestResponseError } from "@openrouter/sdk/models/errors";
 
 const log = logger.child("brain");
-import type {
-  ChatAssistantMessage,
-  ChatChoice,
-  ChatFunctionTool,
-  ChatMessages,
-} from "@/provider";
+import type { ChatFunctionTool, ChatMessages, ToolCall } from "@/provider";
 import {
   brainManager,
   type BrainItem,
@@ -539,99 +534,52 @@ export class Brain<BB extends BrainItem = BrainItem> {
       },
     ];
 
-    for (let step = 0; step < maxSteps; step += 1) {
-      log.debug(`sendMessage: step ${step + 1}/${maxSteps} → model`);
-      let choice: ChatChoice;
-      try {
-        choice = await llm.chatWithTools(llm.models.conversation, {
-          caller: initiate ? "start-conversation" : "send-message",
-          instruction: `${this.brainbase.baseSystemPrompt}\n\n${instruction}`,
-          messages,
-          tools,
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        logger.error(`sendMessage: LLM call failed at step ${step}: ${reason}`);
-        return replyMessages;
-      }
-
-      const assistantMessage = choice.message;
-      const toolCalls = assistantMessage.toolCalls ?? [];
-      const hasContent =
-        typeof assistantMessage.content === "string" &&
-        assistantMessage.content.length > 0;
-
-      log.debug(
-        `sendMessage: step ${step + 1} → toolCalls=${toolCalls.length} hasContent=${hasContent}`,
-      );
-
-      if (toolCalls.length === 0) {
-        log.debug(
-          `sendMessage: model returned no tool calls; finalising with ${replyMessages.length} replies`,
-        );
-        return replyMessages;
-      }
-
-      messages.push(stripAssistantForHistory(assistantMessage));
-
-      for (const call of toolCalls) {
-        if (call.function.name === "addReplyMessage") {
-          const content = parseAddReplyMessageArguments(
-            call.function.arguments,
-          );
-          if (content !== null) {
-            log.debug(
-              `sendMessage: addReplyMessage[${replyMessages.length}] (${content.length} chars)`,
+    try {
+      await llm.chatWithToolExecution(llm.models.conversation, {
+        caller: initiate ? "start-conversation" : "send-message",
+        instruction: `${this.brainbase.baseSystemPrompt}\n\n${instruction}`,
+        messages,
+        tools,
+        maxSteps,
+        executeTool: async (call: ToolCall) => {
+          if (call.function.name === "addReplyMessage") {
+            const content = parseAddReplyMessageArguments(
+              call.function.arguments,
             );
-            send(content);
-            replyMessages.push(content);
-          } else {
+            if (content !== null) {
+              log.debug(
+                `sendMessage: addReplyMessage[${replyMessages.length}] (${content.length} chars)`,
+              );
+              await send(content);
+              replyMessages.push(content);
+              return JSON.stringify({
+                ok: true,
+                index: replyMessages.length - 1,
+              });
+            }
             log.debug(
               `sendMessage: addReplyMessage rejected (invalid arguments: ${call.function.arguments})`,
             );
+            return JSON.stringify({ ok: false, error: "invalid arguments" });
           }
-          messages.push({
-            role: "tool",
-            toolCallId: call.id,
-            content:
-              content === null
-                ? JSON.stringify({ ok: false, error: "invalid arguments" })
-                : JSON.stringify({ ok: true, index: replyMessages.length - 1 }),
-          });
-          continue;
-        }
-        if (call.function.name === "searchMemory") {
-          log.debug(`sendMessage: searchMemory tool call`);
-          const result = await this.executeSearchTool(call.function.arguments);
-          messages.push({
-            role: "tool",
-            toolCallId: call.id,
-            content: result,
-          });
-          continue;
-        }
-        log.debug(`sendMessage: unknown tool "${call.function.name}"`);
-        messages.push({
-          role: "tool",
-          toolCallId: call.id,
-          content: JSON.stringify({
+          if (call.function.name === "searchMemory") {
+            log.debug(`sendMessage: searchMemory tool call`);
+            return this.executeSearchTool(call.function.arguments);
+          }
+          log.debug(`sendMessage: unknown tool "${call.function.name}"`);
+          return JSON.stringify({
             ok: false,
             error: `Unknown tool: ${call.function.name}`,
-          }),
-        });
-      }
-
-      if (
-        !hasContent &&
-        toolCalls.every((c) => c.function.name === "searchMemory")
-      ) {
-        log.debug(`sendMessage: step was pure searchMemory, looping back`);
-        continue;
-      }
+          });
+        },
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.error(`sendMessage: LLM call failed: ${reason}`);
     }
 
-    logger.warn(
-      `sendMessage: reached maxSteps (${maxSteps}) without final reply`,
+    log.debug(
+      `sendMessage: done with ${replyMessages.length} replies`,
     );
     return replyMessages;
   }
@@ -947,13 +895,3 @@ function parseSearchArguments(json: string): string | null {
   return null;
 }
 
-function stripAssistantForHistory(message: {
-  content?: string;
-  toolCalls?: ChatAssistantMessage["toolCalls"];
-}): ChatAssistantMessage {
-  return {
-    role: "assistant",
-    content: message.content,
-    toolCalls: message.toolCalls,
-  };
-}

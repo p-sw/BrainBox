@@ -63,6 +63,12 @@ export type ChatWithToolsOptions = {
   toolChoice?: { type: "tool"; name: string };
 };
 
+/** Multi-step tool loop; single-shot chatWithTools is unchanged. */
+export type ChatWithToolExecutionOptions = ChatWithToolsOptions & {
+  executeTool: (call: ToolCall) => Promise<string>;
+  maxSteps?: number;
+};
+
 // --- Abstract base ----------------------------------------------------------
 
 export type ProviderCtor = new (opts: {
@@ -245,6 +251,61 @@ export abstract class LLMExecutor {
     model: string,
     options: ChatWithToolsOptions,
   ): Promise<ChatChoice>;
+
+  /**
+   * Run chatWithTools in a loop: after each tool-bearing turn, append the
+   * assistant message + tool results to `messages` and call again. Stops when
+   * the model returns no tool calls or maxSteps is hit. Providers stay single-shot.
+   */
+  async chatWithToolExecution(
+    model: string,
+    options: ChatWithToolExecutionOptions,
+  ): Promise<ChatChoice> {
+    const messages = options.messages.slice();
+    const maxSteps = options.maxSteps ?? 20;
+    let last: ChatChoice | undefined;
+
+    for (let step = 0; step < maxSteps; step += 1) {
+      log.debug(
+        `chatWithToolExecution: step ${step + 1}/${maxSteps} msgs=${messages.length}`,
+      );
+      last = await this.chatWithTools(model, {
+        instruction: options.instruction,
+        messages,
+        tools: options.tools,
+        caller: options.caller,
+        reasoningEffort: options.reasoningEffort,
+        parallelToolCalls: options.parallelToolCalls,
+        toolChoice: options.toolChoice,
+      });
+
+      const toolCalls = last.message.toolCalls ?? [];
+      log.debug(
+        `chatWithToolExecution: step ${step + 1} toolCalls=${toolCalls.length}`,
+      );
+      if (toolCalls.length === 0) return last;
+
+      messages.push({
+        role: "assistant",
+        content: last.message.content,
+        toolCalls,
+      });
+
+      for (const call of toolCalls) {
+        const content = await options.executeTool(call);
+        messages.push({
+          role: "tool",
+          toolCallId: call.id,
+          content,
+        });
+      }
+    }
+
+    log.warn(
+      `chatWithToolExecution: reached maxSteps (${maxSteps}) without final reply`,
+    );
+    return last!;
+  }
 
   // ponytail: registry + factory. Adding a provider = one registerProvider call in index.ts.
   private static providers: Array<{ name: string; ctor: ProviderCtor }> = [];
