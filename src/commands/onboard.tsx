@@ -254,13 +254,27 @@ function BrainApp({
           {chalk.bold("Step 3/4")} — Language for{" "}
           <Text color="cyan">{stage.displayName}</Text>
         </Text>
-        <Text dimColor>
-          Primary chat language (English, Korean, 日本語, …). Empty = English.
-        </Text>
-        <TextInput
+        <Text dimColor>↑↓ to move, type to filter, enter to select</Text>
+        <Select
           prompt="language> "
-          onSubmit={(raw) => {
-            const language = raw.trim() || "English";
+          items={[
+            "English",
+            "Korean",
+            "Japanese",
+            "Chinese",
+            "Spanish",
+            "French",
+            "German",
+            "Portuguese",
+            "Italian",
+            "Russian",
+            "Arabic",
+            "Hindi",
+            "Thai",
+            "Vietnamese",
+            "Indonesian",
+          ]}
+          onSelect={(language) => {
             setError(null);
             setStage({
               kind: "seed",
