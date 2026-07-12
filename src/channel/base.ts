@@ -1,6 +1,10 @@
 import { Brain } from "@/brain";
 import type { BrainItemWithChannel } from "@/brain/manager";
-import type { MessageHistoryEntry } from "@/brain/messageHistory";
+import {
+  appendMessageHistory,
+  getMessageHistory as loadMessageHistory,
+  type MessageHistoryEntry,
+} from "@/brain/messageHistory";
 import type { AvailabilityStatus } from "@/provider/schema";
 import { logger } from "@/utils/logger";
 import { formatDateKey, formatMonthKey } from "@/brain/schedule";
@@ -111,7 +115,7 @@ export abstract class BaseChannel<
         return;
       }
     }
-    const history = await this.getMessageHistoryBetween(
+    const history = this.getMessageHistory(
       new Date(Date.now() - 24 * 60 * 60 * 1000),
       new Date(),
     );
@@ -145,14 +149,14 @@ export abstract class BaseChannel<
     const countThreshold = this.brain.brainbase.startConversationCountThreshold;
     if (count >= countThreshold) return;
     const nowMs = now.getTime();
-    const history = await this.getMessageHistoryBetween(
+    const history = this.getMessageHistory(
       new Date(nowMs - 24 * 60 * 60 * 1000),
       now,
     );
     try {
       const replies = await this.brain.sendMessage(history, [], {
         initiate: true,
-        send: this.send.bind(this),
+        send: this.sendAndRecord.bind(this),
       });
       if (replies.length === 0) return;
       this.startConversationCounters.set(dateKey, count + 1);
@@ -278,11 +282,12 @@ export abstract class BaseChannel<
         twoDaysAgo.setDate(now.getDate() - 2);
         this.isSending = true;
         try {
-          await this.brain.sendMessage(
-            await this.getMessageHistoryBetween(twoDaysAgo, now),
-            newUserMessages,
-            { send: this.send.bind(this) },
-          );
+          // History snapshot first so new user msgs aren't duplicated in the prompt.
+          const history = this.getMessageHistory(twoDaysAgo, now);
+          for (const m of newUserMessages) this.saveMessageHistory(m);
+          await this.brain.sendMessage(history, newUserMessages, {
+            send: this.sendAndRecord.bind(this),
+          });
         } catch (e) {
           logger.error(`Error while sending message: ${e}`);
           logger.debug(
@@ -641,10 +646,29 @@ export abstract class BaseChannel<
 
   abstract init(): Promise<void>;
 
-  abstract getMessageHistoryBetween(
+  /** Unified SQLite-backed history for this brain's channel. */
+  getMessageHistory(
     start: Date,
     end: Date,
-  ): Promise<ReadonlyArray<MessageHistoryEntry>>;
+  ): ReadonlyArray<MessageHistoryEntry> {
+    return loadMessageHistory(this.brain.brainbase.brainId, start, end);
+  }
+
+  /** Persist a message that actually entered the LLM/send path. */
+  protected saveMessageHistory(entry: MessageHistoryEntry): void {
+    appendMessageHistory(this.brain.brainbase.brainId, entry);
+  }
+
+  /** Channel send + record persona reply into history. */
+  private async sendAndRecord(text: string): Promise<void> {
+    await this.send(text);
+    this.saveMessageHistory({
+      sender: "persona",
+      time: new Date(),
+      content: text,
+    });
+  }
+
   abstract send(text: string, opts?: { replyTo?: string }): Promise<void>;
   abstract setAvailability(status: AvailabilityStatus): Promise<void>;
 }

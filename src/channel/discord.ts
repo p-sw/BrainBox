@@ -9,9 +9,7 @@ import { logger } from "@/utils/logger";
 import { BaseChannel, type PairingEntry, type PairingInbound } from "./base";
 import type { BrainItemDiscord } from "@/brain/manager";
 import type { Brain } from "@/brain";
-import type { MessageHistoryEntry } from "@/brain/messageHistory";
 
-const HISTORY_CAP = 1000;
 const AVAILABILITY_STATUS_MAP: Record<
   AvailabilityStatus,
   "online" | "dnd" | "invisible"
@@ -24,7 +22,6 @@ const AVAILABILITY_STATUS_MAP: Record<
 export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
   private client?: Client;
   private targetChannel?: SendableChannels;
-  private history: MessageHistoryEntry[] = [];
 
   constructor(brain: Brain<BrainItemDiscord>) {
     super(brain);
@@ -80,16 +77,14 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         void this.onPairing(inbound);
         return;
       }
-      const entry: MessageHistoryEntry = {
+      logger.debug(
+        `MessageCreate: dispatching (channel=${msg.channelId})`,
+      );
+      void this.onMessage({
         sender: "user",
         time: msg.createdAt,
         content,
-      };
-      this.pushHistory(entry);
-      logger.debug(
-        `MessageCreate: stored in history, dispatching (channel=${msg.channelId})`,
-      );
-      void this.onMessage(entry);
+      });
     });
     logger.debug(`DiscordChannel.init: logging in`);
     await this.client.login(this.brain.brainbase.discord.token);
@@ -165,18 +160,6 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
     const mapped = AVAILABILITY_STATUS_MAP[status];
     logger.debug(`setAvailability: ${status} → ${mapped}`);
     this.client.user.setStatus(mapped);
-  }
-
-  async getMessageHistoryBetween(
-    start: Date,
-    end: Date,
-  ): Promise<ReadonlyArray<MessageHistoryEntry>> {
-    return this.history.filter((m) => m.time >= start && m.time <= end);
-  }
-
-  private pushHistory(entry: MessageHistoryEntry): void {
-    this.history.push(entry);
-    if (this.history.length > HISTORY_CAP) this.history.shift();
   }
 
   private async resolveSendChannel(): Promise<SendableChannels | undefined> {

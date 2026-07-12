@@ -4,14 +4,10 @@ import { logger } from "@/utils/logger";
 import { BaseChannel, type PairingInbound, type PairingEntry } from "./base";
 import type { BrainItemTelegram } from "@/brain/manager";
 import type { Brain } from "@/brain";
-import type { MessageHistoryEntry } from "@/brain/messageHistory";
-
-const HISTORY_CAP = 1000;
 
 export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
   private bot?: Bot;
   private chatId?: number;
-  private history: MessageHistoryEntry[] = [];
 
   constructor(brain: Brain<BrainItemTelegram>) {
     super(brain);
@@ -59,16 +55,14 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
         return;
       }
       this.chatId = ctx.chat.id;
-      const entry: MessageHistoryEntry = {
+      logger.debug(
+        `Telegram message: dispatching (chat=${ctx.chat.id})`,
+      );
+      void this.onMessage({
         sender: "user",
         time: inbound.time,
         content: text,
-      };
-      this.pushHistory(entry);
-      logger.debug(
-        `Telegram message: stored in history, dispatching (chat=${ctx.chat.id})`,
-      );
-      void this.onMessage(entry);
+      });
     });
     logger.debug(`TelegramChannel.init: starting bot`);
     await this.bot.start();
@@ -125,18 +119,6 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
       `setAvailability: ${_status} (no-op, Telegram has no bot presence)`,
     );
     // ponytail: Telegram Bot API exposes no bot presence concept — no-op.
-  }
-
-  async getMessageHistoryBetween(
-    start: Date,
-    end: Date,
-  ): Promise<ReadonlyArray<MessageHistoryEntry>> {
-    return this.history.filter((m) => m.time >= start && m.time <= end);
-  }
-
-  private pushHistory(entry: MessageHistoryEntry): void {
-    this.history.push(entry);
-    if (this.history.length > HISTORY_CAP) this.history.shift();
   }
 
   protected async teardownClient(): Promise<void> {
