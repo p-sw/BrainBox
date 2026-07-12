@@ -1,16 +1,16 @@
 {
   "name": "@p-sw/brainbox",
   "version": "0.2.3-beta.1",
-  "module": "dist/index.js",
-  "main": "dist/index.js",
+  "module": "dist/brainbox",
+  "main": "dist/brainbox",
   "type": "module",
   "bin": {
-    "brainbox": "./dist/index.js"
+    "brainbox": "./dist/brainbox"
   },
   "scripts": {
     "cli": "bun run src/index.ts",
     "format": "bun run prettier 'src/**/*.ts' -w",
-    "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --target bun --packages external && sed -i '1s|#!/usr/bin/env node|#!/usr/bin/env bun|' dist/index.js && cp -r prompts dist/prompts && chmod +x dist/index.js",
+    "build": "rm -rf dist && mkdir -p dist && bun build ./src/index.ts --compile --packages=bundle --outfile dist/brainbox",
     "prepack": "bun run build"
   },
   "devDependencies": {
@@ -31,6 +31,7 @@
     "ink": "^7.1.0",
     "prettier": "^3.8.3",
     "react": "^19.2.7",
+    "react-devtools-core": "^7.0.1",
     "supermemory": "^4.24.12",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"

@@ -1,8 +1,5 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { Command } from "commander";
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
 import { logger } from "@/utils/logger";
 import { config } from "@/config";
 import { register as daemon } from "@/commands/daemon";
@@ -12,9 +9,7 @@ import { register as restart } from "@/commands/restart";
 import { register as auth } from "@/commands/auth";
 import { register as model } from "@/commands/model";
 import { register as onboard } from "@/commands/onboard";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import packageJson from "../package.json";
 
 logger.configure({ level: config.debug ? "debug" : "info" });
 logger.debug(
@@ -22,13 +17,7 @@ logger.debug(
 );
 
 function getVersion(): string {
-  try {
-    const pkgPath = join(__dirname, "..", "package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    return pkg.version ?? "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+  return packageJson.version ?? "0.0.0";
 }
 
 const argv = process.argv;
