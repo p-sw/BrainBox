@@ -67,6 +67,15 @@ export type ChatWithToolsOptions = {
 export type ChatWithToolExecutionOptions = ChatWithToolsOptions & {
   executeTool: (call: ToolCall) => Promise<string>;
   maxSteps?: number;
+  /** After a tool batch is applied, return true to end the loop. */
+  shouldEnd?: (toolCalls: ToolCall[]) => boolean;
+  /**
+   * When the model returns no tool calls: return a user message to re-prompt
+   * and continue, or null/undefined to accept the bare end.
+   */
+  onNoToolCalls?: (
+    choice: ChatChoice,
+  ) => string | null | undefined | Promise<string | null | undefined>;
 };
 
 // --- Abstract base ----------------------------------------------------------
@@ -254,8 +263,9 @@ export abstract class LLMExecutor {
 
   /**
    * Run chatWithTools in a loop: after each tool-bearing turn, append the
-   * assistant message + tool results to `messages` and call again. Stops when
-   * the model returns no tool calls or maxSteps is hit. Providers stay single-shot.
+   * assistant message + tool results to `messages` and call again.
+   * Ends when: shouldEnd says so, no tool calls (and onNoToolCalls accepts),
+   * or maxSteps. Providers stay single-shot.
    */
   async chatWithToolExecution(
     model: string,
@@ -283,7 +293,21 @@ export abstract class LLMExecutor {
       log.debug(
         `chatWithToolExecution: step ${step + 1} toolCalls=${toolCalls.length}`,
       );
-      if (toolCalls.length === 0) return last;
+
+      if (toolCalls.length === 0) {
+        const nudge = options.onNoToolCalls
+          ? await options.onNoToolCalls(last)
+          : null;
+        if (nudge == null) return last;
+
+        log.debug(`chatWithToolExecution: bare end rejected, re-prompting`);
+        messages.push({
+          role: "assistant",
+          content: last.message.content ?? "",
+        });
+        messages.push({ role: "user", content: nudge });
+        continue;
+      }
 
       messages.push({
         role: "assistant",
@@ -298,6 +322,11 @@ export abstract class LLMExecutor {
           toolCallId: call.id,
           content,
         });
+      }
+
+      if (options.shouldEnd?.(toolCalls)) {
+        log.debug(`chatWithToolExecution: shouldEnd after step ${step + 1}`);
+        return last;
       }
     }
 

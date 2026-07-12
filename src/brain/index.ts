@@ -566,11 +566,25 @@ export class Brain<BB extends BrainItem = BrainItem> {
             log.debug(`sendMessage: searchMemory tool call`);
             return this.executeSearchTool(call.function.arguments);
           }
+          if (call.function.name === "stop") {
+            log.debug(`sendMessage: stop tool call`);
+            return JSON.stringify({ ok: true });
+          }
           log.debug(`sendMessage: unknown tool "${call.function.name}"`);
           return JSON.stringify({
             ok: false,
             error: `Unknown tool: ${call.function.name}`,
           });
+        },
+        shouldEnd: (toolCalls) =>
+          toolCalls.some((c) => c.function.name === "stop"),
+        onNoToolCalls: () => {
+          // After at least one send, bare end is fine. Otherwise require stop or send.
+          if (replyMessages.length > 0) return null;
+          return (
+            "If you do not want to send a message, call the `stop` tool explicitly to end your turn. " +
+            "If you meant to send a message but ended by mistake, call `addReplyMessage`."
+          );
         },
       });
     } catch (error) {
@@ -841,7 +855,7 @@ function buildSendMessageTools(): ChatFunctionTool[] {
     {
       name: "addReplyMessage",
       description:
-        "Append one chat bubble to the reply stream. Call once per bubble you want to send. Do not call when you are done — just return text without tool calls.",
+        "Append one chat bubble to the reply stream. Call once per bubble you want to send. After at least one successful call, you may end your turn without calling stop.",
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -866,6 +880,16 @@ function buildSendMessageTools(): ChatFunctionTool[] {
           },
         },
         required: ["query"],
+      },
+    },
+    {
+      name: "stop",
+      description:
+        "End your turn without sending any further messages. Required when you choose not to send a message. Not needed once you have already called addReplyMessage at least once.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
       },
     },
   ];
