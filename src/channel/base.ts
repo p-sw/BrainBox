@@ -26,7 +26,7 @@ const SCHEDULE_CRON_PATTERN = "0 0 * * *"; // every day at 00:00
 const SCHEDULE_NOON_CRON_KEY = "__schedule-noon__";
 const SCHEDULE_NOON_CRON_PATTERN = "0 12 * * *"; // every day at 12:00 (backup tick)
 
-export const DO_ACTIONS = ["generateSchedule", "sleepMemory"] as const;
+export const DO_ACTIONS = ["generateSchedule", "sleepMemory", "resetAvailability"] as const;
 export type DoAction = (typeof DO_ACTIONS)[number];
 
 export const VIEW_THINGS = [
@@ -459,6 +459,8 @@ export abstract class BaseChannel<
       try {
         if (action === "generateSchedule") {
           await channel.regenerateSchedules();
+        } else if (action === "resetAvailability") {
+          channel.brain.invalidateScheduledAvailability();
         } else {
           await channel.runSleepMemory(true);
         }
