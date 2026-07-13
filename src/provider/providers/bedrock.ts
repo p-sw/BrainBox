@@ -328,10 +328,14 @@ export class BedrockExecutor extends LLMExecutor {
         `bedrock provider currently only supports Anthropic models (got ${model})`,
       );
     }
+    const { system, msgs } = toAnthropicMessages([
+      { role: "system", content: options.instruction },
+      ...options.messages,
+    ]);
     const body: BedrockBody = {
       anthropic_version: "bedrock-2023-05-31",
       max_tokens: 4096,
-      system: system ?? options.instruction,
+      system,
       messages: msgs,
       tools: options.tools.map(toAnthropicTool),
     };

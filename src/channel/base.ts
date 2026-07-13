@@ -266,7 +266,7 @@ export abstract class BaseChannel<
     this.enqueueForSend(message);
 
     this.isChatting = true;
-    clearTimeout(this.isChattingDebounce);
+    if (this.isChattingDebounce) clearTimeout(this.isChattingDebounce);
     this.isChattingDebounce = setTimeout(() => {
       this.isChatting = false;
       this.isChattingDebounce = null;
@@ -290,7 +290,7 @@ export abstract class BaseChannel<
   }
 
   private armMessageDebounce(): void {
-    clearTimeout(this.messageDebounce);
+    if (this.messageDebounce) clearTimeout(this.messageDebounce);
     this.messageDebounce = setTimeout(async () => {
       const newUserMessages = this.messageInQueue.splice(
         0,
