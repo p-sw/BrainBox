@@ -283,9 +283,7 @@ export abstract class BaseChannel<
       return;
     }
     this.messageInQueue.push(message);
-    logger.debug(
-      `onMessage: queued (queueSize=${this.messageInQueue.length})`,
-    );
+    logger.debug(`onMessage: queued (queueSize=${this.messageInQueue.length})`);
     this.armMessageDebounce();
   }
 

@@ -5,7 +5,12 @@ import { brainManager } from "@/brain/manager";
 import { Brain } from "@/brain";
 import { logger } from "@/utils/logger";
 import { sendToDaemon, type DaemonResponse } from "@/utils/daemonClient";
-import { DO_ACTIONS, type DoAction, VIEW_THINGS, type ViewThing } from "@/channel/base";
+import {
+  DO_ACTIONS,
+  type DoAction,
+  VIEW_THINGS,
+  type ViewThing,
+} from "@/channel/base";
 
 export async function listBrains(): Promise<void> {
   const brains = await brainManager.listBrains();
@@ -69,7 +74,10 @@ export async function createBrain(
   logger.debug(
     `createBrain: name="${displayName}" language="${language}" gender="${gender}" seed length=${seedText.length} schedule=${options.schedule}`,
   );
-  const result = await Brain.create(displayName, seedText, { language, gender });
+  const result = await Brain.create(displayName, seedText, {
+    language,
+    gender,
+  });
   if ("error" in result) {
     logger.error(`Failed to create brain "${displayName}": ${result.error}`);
     process.exitCode = 1;
@@ -121,9 +129,7 @@ export async function doAction(action: string, brainId: string): Promise<void> {
     args: { action, brainId },
   });
   const name = response.result?.displayName ?? brainId;
-  logger.success(
-    `Successfully sent ${action} for "${name}" (${brainId}).`,
-  );
+  logger.success(`Successfully sent ${action} for "${name}" (${brainId}).`);
 }
 
 export async function viewThing(thing: string, brainId: string): Promise<void> {
@@ -192,9 +198,7 @@ export function register(program: Command): Command {
     .action(doAction);
   cmd
     .command("view <thing> <brainId>")
-    .description(
-      `Inspect a live brain value (${VIEW_THINGS.join(" | ")})`,
-    )
+    .description(`Inspect a live brain value (${VIEW_THINGS.join(" | ")})`)
     .action(viewThing);
   return cmd;
 }

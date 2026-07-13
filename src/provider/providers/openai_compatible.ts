@@ -259,7 +259,8 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     // MiniMax returns business errors under base_resp with HTTP 200 and empty choices.
     const baseCode = data.base_resp?.status_code;
     if (typeof baseCode === "number" && baseCode !== 0) {
-      const msg = data.base_resp?.status_msg?.trim() || `status_code ${baseCode}`;
+      const msg =
+        data.base_resp?.status_msg?.trim() || `status_code ${baseCode}`;
       log.error(`${this.providerName}: base_resp ${baseCode} ${msg}`);
       throw new Error(`${this.providerName} API error: ${msg}`);
     }

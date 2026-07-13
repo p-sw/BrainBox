@@ -50,7 +50,9 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
       logger.success(`Discord ready as ${c.user.tag}`);
       const channelId = this.brain.brainbase.discord.channelId;
       if (channelId && !this.targetChannel) {
-        logger.debug(`DiscordClientReady: resolving configured channel ${channelId}`);
+        logger.debug(
+          `DiscordClientReady: resolving configured channel ${channelId}`,
+        );
         void this.resolveConfiguredChannel(channelId);
       }
       void this.initAvailability();
@@ -77,9 +79,7 @@ export class DiscordChannel extends BaseChannel<BrainItemDiscord> {
         void this.onPairing(inbound);
         return;
       }
-      logger.debug(
-        `MessageCreate: dispatching (channel=${msg.channelId})`,
-      );
+      logger.debug(`MessageCreate: dispatching (channel=${msg.channelId})`);
       void this.onMessage({
         sender: "user",
         time: msg.createdAt,

@@ -295,7 +295,9 @@ export class BedrockExecutor extends LLMExecutor {
       });
       return parseStructuredJsonResult(choice, toolName) as T;
     }
-    log.debug(`call: model=${model} jsonSchema=- msgLen=${options.message.length}`);
+    log.debug(
+      `call: model=${model} jsonSchema=- msgLen=${options.message.length}`,
+    );
     if (!model.startsWith("anthropic.") && !model.startsWith("us.anthropic.")) {
       throw new Error(
         `bedrock provider currently only supports Anthropic models (got ${model})`,

@@ -99,4 +99,3 @@ export function removeProviderAuth(provider: string): AuthFile {
     return next;
   });
 }
-

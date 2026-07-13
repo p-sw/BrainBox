@@ -92,9 +92,7 @@ export class Memory {
   }
 
   async search(query: string, limit = 5): Promise<SearchHit[]> {
-    log.debug(
-      `search: q="${query}" limit=${limit} space=${this.space.name}`,
-    );
+    log.debug(`search: q="${query}" limit=${limit} space=${this.space.name}`);
     const response = await this.db.search.execute({
       q: query,
       containerTag: this.space.name,

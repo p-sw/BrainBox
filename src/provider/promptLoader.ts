@@ -4,20 +4,12 @@ import dailySchedule from "../../prompts/daily_schedule.md" with { type: "text" 
 import memoir from "../../prompts/memoir.md" with { type: "text" };
 import monthlySchedule from "../../prompts/monthly_schedule.md" with { type: "text" };
 import objectifier from "../../prompts/objectifier.md" with { type: "text" };
-import personaBaseSystemPrompt from "../../prompts/persona_base_system_prompt.md" with {
-  type: "text",
-};
-import personaBaseSystemPromptFixed from "../../prompts/persona_base_system_prompt_fixed.md" with {
-  type: "text",
-};
+import personaBaseSystemPrompt from "../../prompts/persona_base_system_prompt.md" with { type: "text" };
+import personaBaseSystemPromptFixed from "../../prompts/persona_base_system_prompt_fixed.md" with { type: "text" };
 import personaInit from "../../prompts/persona_init.md" with { type: "text" };
-import scheduleAvailability from "../../prompts/schedule_availability.md" with {
-  type: "text",
-};
+import scheduleAvailability from "../../prompts/schedule_availability.md" with { type: "text" };
 import sendMessage from "../../prompts/send_message.md" with { type: "text" };
-import startConversation from "../../prompts/start_conversation.md" with {
-  type: "text",
-};
+import startConversation from "../../prompts/start_conversation.md" with { type: "text" };
 
 const log = logger.child("prompt-loader");
 

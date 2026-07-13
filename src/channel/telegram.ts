@@ -18,9 +18,7 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
     this.chatId = this.brain.brainbase.telegram.chatId;
     if (this.chatId !== undefined) {
       this.isReady = true;
-      logger.debug(
-        `TelegramChannel.init: pre-bound chatId=${this.chatId}`,
-      );
+      logger.debug(`TelegramChannel.init: pre-bound chatId=${this.chatId}`);
     } else {
       this.engagePairing();
       logger.debug(`TelegramChannel.init: entering pairing mode`);
@@ -48,16 +46,12 @@ export class TelegramChannel extends BaseChannel<BrainItemTelegram> {
         chatId: ctx.chat.id,
       };
       if (chatId === undefined) {
-        logger.debug(
-          `Telegram message: routing to pairing (no chatId bound)`,
-        );
+        logger.debug(`Telegram message: routing to pairing (no chatId bound)`);
         void this.onPairing(inbound);
         return;
       }
       this.chatId = ctx.chat.id;
-      logger.debug(
-        `Telegram message: dispatching (chat=${ctx.chat.id})`,
-      );
+      logger.debug(`Telegram message: dispatching (chat=${ctx.chat.id})`);
       void this.onMessage({
         sender: "user",
         time: inbound.time,

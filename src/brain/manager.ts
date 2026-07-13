@@ -160,9 +160,7 @@ export class BrainDBManager {
         }
         return true;
       default:
-        log.debug(
-          `isBrainReady: ${item.brainId} has no channel configured`,
-        );
+        log.debug(`isBrainReady: ${item.brainId} has no channel configured`);
         return false;
     }
   }

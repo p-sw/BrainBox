@@ -120,7 +120,11 @@ export const baseSystemPromptSchema = {
   properties: {
     baseSystemPrompt: { type: "string" },
     dndReplyProbability: { type: "number", minimum: 0, maximum: 1 },
-    startConversationCountThreshold: { type: "integer", minimum: 0, maximum: 10 },
+    startConversationCountThreshold: {
+      type: "integer",
+      minimum: 0,
+      maximum: 10,
+    },
     startConversationTimeThreshold: {
       type: "integer",
       minimum: 30,

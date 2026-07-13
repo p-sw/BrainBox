@@ -616,9 +616,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       logger.error(`sendMessage: LLM call failed: ${reason}`);
     }
 
-    log.debug(
-      `sendMessage: done with ${replyMessages.length} replies`,
-    );
+    log.debug(`sendMessage: done with ${replyMessages.length} replies`);
     return replyMessages;
   }
 
@@ -970,4 +968,3 @@ function parseSearchArguments(json: string): string | null {
   }
   return null;
 }
-

@@ -8,7 +8,10 @@ defineCommand<{ thing: string; brainId: string }>({
     const thing = args?.thing;
     const brainId = args?.brainId;
     logger.debug(`view handler: thing="${thing}" brainId="${brainId}"`);
-    if (typeof thing !== "string" || !VIEW_THINGS.includes(thing as ViewThing)) {
+    if (
+      typeof thing !== "string" ||
+      !VIEW_THINGS.includes(thing as ViewThing)
+    ) {
       return {
         ok: false,
         error: `invalid thing (expected one of: ${VIEW_THINGS.join(", ")})`,

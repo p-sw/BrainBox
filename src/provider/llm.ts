@@ -441,7 +441,6 @@ export function logLlmWire(
   );
 }
 
-
 // ponytail: thin wrapper so callers can `import { listProviderNames }`
 // without going through the class — static class members aren't a top-level
 // binding under `verbatimModuleSyntax`.

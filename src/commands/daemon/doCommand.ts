@@ -8,7 +8,10 @@ defineCommand<{ action: string; brainId: string }>({
     const action = args?.action;
     const brainId = args?.brainId;
     logger.debug(`do handler: action="${action}" brainId="${brainId}"`);
-    if (typeof action !== "string" || !DO_ACTIONS.includes(action as DoAction)) {
+    if (
+      typeof action !== "string" ||
+      !DO_ACTIONS.includes(action as DoAction)
+    ) {
       return {
         ok: false,
         error: `invalid action (expected one of: ${DO_ACTIONS.join(", ")})`,
@@ -21,7 +24,11 @@ defineCommand<{ action: string; brainId: string }>({
     if (!result.ok) return result;
     return {
       ok: true,
-      result: { action, brainId: brainId.trim(), displayName: result.displayName },
+      result: {
+        action,
+        brainId: brainId.trim(),
+        displayName: result.displayName,
+      },
     };
   },
 });

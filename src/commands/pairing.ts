@@ -25,8 +25,6 @@ export function register(program: Command): Command {
     name: "pairing",
     description: "Complete channel pairing with a pairing code",
     configure: (cmd) =>
-      cmd
-        .argument("<code>", "Pairing code issued by the channel")
-        .action(pair),
+      cmd.argument("<code>", "Pairing code issued by the channel").action(pair),
   });
 }
