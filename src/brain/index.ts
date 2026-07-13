@@ -33,6 +33,18 @@ import { formatDateKey, formatMonthKey, pad2 } from "./schedule";
 import type { Space } from "./types";
 import { Memory } from "./memory";
 
+function toMinutes(hhmm: string): number {
+  const [hh = 0, mm = 0] = hhmm.split(":").map((x) => parseInt(x, 10));
+  return hh * 60 + mm;
+}
+
+/** Inclusive of start, exclusive of end. Supports overnight (start > end). */
+function minutesInWindow(current: number, start: number, end: number): boolean {
+  if (start === end) return false;
+  if (start < end) return start <= current && current < end;
+  return current >= start || current < end;
+}
+
 export interface BrainCreateResult {
   brain: Brain;
   description: string;
@@ -362,13 +374,9 @@ export class Brain<BB extends BrainItem = BrainItem> {
     const m = datetime.getMinutes();
     const hhmm = `${pad2(h)}:${pad2(m)}`;
     const current = h * 60 + m;
-    const toMinutes = (s: string): number => {
-      const [hh = 0, mm = 0] = s.split(":").map((x) => parseInt(x, 10));
-      return hh * 60 + mm;
-    };
     const windows = await this.getTodayScheduledAvailability(datetime);
-    const match = windows?.items.find(
-      (w) => toMinutes(w.start) <= current && current < toMinutes(w.end),
+    const match = windows?.items.find((w) =>
+      minutesInWindow(current, toMinutes(w.start), toMinutes(w.end)),
     );
     const result = match ?? { start: hhmm, end: hhmm, status: "offline" };
     log.debug(
@@ -394,14 +402,12 @@ export class Brain<BB extends BrainItem = BrainItem> {
       return [];
     }
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const toMinutes = (hhmm: string): number => {
-      const [h = 0, m = 0] = hhmm.split(":").map((x) => parseInt(x, 10));
-      return h * 60 + m;
-    };
-    const index = schedule.items.findIndex(
-      (slot) =>
-        toMinutes(slot.start) <= currentMinutes &&
-        currentMinutes < toMinutes(slot.end),
+    const index = schedule.items.findIndex((slot) =>
+      minutesInWindow(
+        currentMinutes,
+        toMinutes(slot.start),
+        toMinutes(slot.end),
+      ),
     );
     if (index === -1) {
       log.debug(
