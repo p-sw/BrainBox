@@ -79,20 +79,14 @@ export abstract class BaseChannel<
   private static activeChannels = new Map<string, BaseChannel>();
 
   constructor(protected readonly brain: Brain<BB>) {
-    this.registerCron(
-      SLEEP_MEMORY_CRON_KEY,
-      SLEEP_MEMORY_CRON_PATTERN,
-      () => this.runSleepMemory(),
+    this.registerCron(SLEEP_MEMORY_CRON_KEY, SLEEP_MEMORY_CRON_PATTERN, () =>
+      this.runSleepMemory(),
     );
-    this.registerCron(
-      SCHEDULE_CRON_KEY,
-      SCHEDULE_CRON_PATTERN,
-      () => this.regenerateSchedules(),
+    this.registerCron(SCHEDULE_CRON_KEY, SCHEDULE_CRON_PATTERN, () =>
+      this.regenerateSchedules(),
     );
-    this.registerCron(
-      SCHEDULE_NOON_CRON_KEY,
-      SCHEDULE_NOON_CRON_PATTERN,
-      () => this.regenerateSchedules(),
+    this.registerCron(SCHEDULE_NOON_CRON_KEY, SCHEDULE_NOON_CRON_PATTERN, () =>
+      this.regenerateSchedules(),
     );
     this.registerCron(
       START_CONVERSATION_CRON_KEY,
@@ -156,10 +150,12 @@ export abstract class BaseChannel<
       now,
     );
     try {
+      this.isSending = true;
       const replies = await this.brain.sendMessage(history, [], {
         initiate: true,
         send: this.sendAndRecord.bind(this),
       });
+      this.isSending = false;
       if (replies.length === 0) return;
       this.startConversationCounters.set(dateKey, count + 1);
       this.startConversationTimeout = true;
