@@ -1,5 +1,5 @@
 import { config } from "@/config";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, rename, writeFile } from "fs/promises";
 import { join } from "path";
 import { logger } from "@/utils/logger";
 
@@ -41,6 +41,9 @@ export type BrainItemWithChannel = BrainItemDiscord | BrainItemTelegram;
 export type BrainList = BrainItem[];
 
 export class BrainDBManager {
+  // ponytail: serialize read-modify-write in this process; cross-process uses atomic rename.
+  private writeChain: Promise<void> = Promise.resolve();
+
   constructor(private readonly root: string = config.brainboxRoot) {}
 
   private dbFile(): string {
@@ -50,17 +53,33 @@ export class BrainDBManager {
   private async readDB(): Promise<BrainList> {
     try {
       const content = await readFile(this.dbFile(), { encoding: "utf-8" });
-      return JSON.parse(content) as BrainList;
-    } catch {
-      return [];
+      const parsed: unknown = JSON.parse(content);
+      if (!Array.isArray(parsed)) {
+        throw new Error("brains.json root must be an array");
+      }
+      return parsed as BrainList;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      // Never treat corruption as empty — a later save would wipe all brains.
+      throw err;
     }
   }
 
   private async writeDB(list: BrainList): Promise<void> {
     await mkdir(this.root, { recursive: true });
-    await writeFile(this.dbFile(), JSON.stringify(list, null, 2), {
-      encoding: "utf-8",
-    });
+    const target = this.dbFile();
+    const tmp = `${target}.${process.pid}.tmp`;
+    await writeFile(tmp, JSON.stringify(list, null, 2), { encoding: "utf-8" });
+    await rename(tmp, target);
+  }
+
+  private withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(fn, fn);
+    this.writeChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   async loadBrain(brainId: string): Promise<BrainItem | undefined> {
@@ -78,14 +97,16 @@ export class BrainDBManager {
   }
 
   async saveBrain(brainId: string, brain: BrainItem): Promise<void> {
-    log.debug(`saveBrain: id=${brainId} name=${brain.displayName}`);
-    const list = await this.readDB();
-    const idx = list.findIndex((b) => b.brainId === brainId);
-    const op = idx >= 0 ? "update" : "insert";
-    if (idx >= 0) list[idx] = brain;
-    else list.push(brain);
-    await this.writeDB(list);
-    log.debug(`saveBrain: ${op} committed (db size=${list.length})`);
+    return this.withWriteLock(async () => {
+      log.debug(`saveBrain: id=${brainId} name=${brain.displayName}`);
+      const list = await this.readDB();
+      const idx = list.findIndex((b) => b.brainId === brainId);
+      const op = idx >= 0 ? "update" : "insert";
+      if (idx >= 0) list[idx] = brain;
+      else list.push(brain);
+      await this.writeDB(list);
+      log.debug(`saveBrain: ${op} committed (db size=${list.length})`);
+    });
   }
 
   async listAvailableBrain(): Promise<BrainItemWithChannel[]> {
@@ -98,15 +119,17 @@ export class BrainDBManager {
   }
 
   async deleteBrain(brainId: string): Promise<void> {
-    log.debug(`deleteBrain: id=${brainId}`);
-    const list = await this.readDB();
-    const filtered = list.filter((b) => b.brainId !== brainId);
-    if (filtered.length === list.length) {
-      log.debug(`deleteBrain: no-op (id not in db)`);
-      return;
-    }
-    await this.writeDB(filtered);
-    log.debug(`deleteBrain: removed (db size=${filtered.length})`);
+    return this.withWriteLock(async () => {
+      log.debug(`deleteBrain: id=${brainId}`);
+      const list = await this.readDB();
+      const filtered = list.filter((b) => b.brainId !== brainId);
+      if (filtered.length === list.length) {
+        log.debug(`deleteBrain: no-op (id not in db)`);
+        return;
+      }
+      await this.writeDB(filtered);
+      log.debug(`deleteBrain: removed (db size=${filtered.length})`);
+    });
   }
 
   async isBrainAvailable(brainId: string): Promise<boolean> {
