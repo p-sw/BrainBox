@@ -153,6 +153,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
           date: dateKey,
         },
       });
+      this.availabilityCache.delete(dateKey);
       log.debug(`createDailySchedule: persisted ${dateKey}`);
 
       return schedule;
@@ -191,6 +192,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
     await this.createDailySchedule(tomorrow);
     await this.createDailySchedule(today);
+    this.invalidateScheduledAvailability(today);
   }
 
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
@@ -455,18 +457,18 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
   invalidateScheduledAvailability(datetime: Date = new Date()): void {
     const todayKey = formatDateKey(datetime);
-    let removed = 0;
+    // Drop today (and any stale past keys) so regen/forceDo picks up new windows.
+    this.availabilityCache.delete(todayKey);
+    let removed = 1;
     for (const key of this.availabilityCache.keys()) {
       if (key < todayKey) {
         this.availabilityCache.delete(key);
         removed += 1;
       }
     }
-    if (removed > 0) {
-      log.debug(
-        `invalidateScheduledAvailability: dropped ${removed} stale cache entries (<${todayKey})`,
-      );
-    }
+    log.debug(
+      `invalidateScheduledAvailability: dropped cache for ${todayKey} (+ stale); ~${removed} keys touched`,
+    );
   }
 
   async persistBrainBase(): Promise<void> {
