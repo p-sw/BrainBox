@@ -53,14 +53,22 @@ export async function deactivateBrain(brainId: string): Promise<void> {
 
 export async function createBrain(
   displayName: string,
-  seed: string,
+  seed: string | undefined,
   options: { schedule: boolean; language: string },
 ): Promise<void> {
   const language = options.language?.trim() || "English";
+  const seedText = (seed ?? "").trim();
+  if (!seedText) {
+    logger.error(
+      'Seed is required. Usage: brainbox brain create <name> "<seed description>"',
+    );
+    process.exitCode = 1;
+    return;
+  }
   logger.debug(
-    `createBrain: name="${displayName}" language="${language}" seed length=${seed.length} schedule=${options.schedule}`,
+    `createBrain: name="${displayName}" language="${language}" seed length=${seedText.length} schedule=${options.schedule}`,
   );
-  const result = await Brain.create(displayName, seed, { language });
+  const result = await Brain.create(displayName, seedText, { language });
   if ("error" in result) {
     logger.error(`Failed to create brain "${displayName}": ${result.error}`);
     process.exitCode = 1;
