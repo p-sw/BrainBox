@@ -12,8 +12,8 @@ import { TelegramChannel } from "@/channel/telegram";
 import { logger, configureLlmLog } from "@/utils/logger";
 import { DAEMON_SOCKET_PATH } from "@/utils/daemonClient";
 import { config } from "@/config";
-import { createServer, type Socket } from "node:net";
-import { chmodSync, unlinkSync } from "node:fs";
+import { createServer, connect, type Socket } from "node:net";
+import { chmodSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { dispatch } from "./daemon/commands";
 
@@ -81,7 +81,27 @@ export async function daemon(): Promise<void> {
 
 const SOCKET_PATH = DAEMON_SOCKET_PATH;
 
+async function isSocketLive(path: string): Promise<boolean> {
+  if (!existsSync(path)) return false;
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  const sock = connect(path);
+  sock.once("connect", () => {
+    sock.destroy();
+    resolve(true);
+  });
+  sock.once("error", () => {
+    sock.destroy();
+    resolve(false);
+  });
+  return promise;
+}
+
 async function listenOnSocket(): Promise<void> {
+  if (await isSocketLive(SOCKET_PATH)) {
+    throw new Error(
+      `Daemon already running at ${SOCKET_PATH} (refusing to hijack live socket)`,
+    );
+  }
   logger.debug(`listenOnSocket: unlinking stale socket at ${SOCKET_PATH}`);
   try {
     unlinkSync(SOCKET_PATH);
@@ -100,7 +120,8 @@ async function listenOnSocket(): Promise<void> {
     handleConnection(conn);
   });
 
-  await new Promise<void>((resolve, reject) => {
+  {
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
     const onError = (err: Error) => {
       server.off("listening", onListening);
       reject(err);
@@ -114,9 +135,11 @@ async function listenOnSocket(): Promise<void> {
     server.once("error", onError);
     server.once("listening", onListening);
     server.listen(SOCKET_PATH);
-  });
+    await promise;
+  }
 
-  await new Promise<void>((resolve) => {
+  {
+    const { promise, resolve } = Promise.withResolvers<void>();
     let shuttingDown = false;
     const shutdown = () => {
       if (shuttingDown) return;
@@ -142,7 +165,8 @@ async function listenOnSocket(): Promise<void> {
     };
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
-  });
+    await promise;
+  }
   logger.info("Daemon shutting down.");
 }
 
