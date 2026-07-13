@@ -169,6 +169,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     tools?: unknown[];
     parallelToolCalls?: boolean;
     reasoningEffort?: ReasoningEffort;
+    toolChoice?: { type: "tool"; name: string };
   }): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model: opts.model,
@@ -179,6 +180,12 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     if (opts.tools) body["tools"] = opts.tools;
     if (opts.parallelToolCalls !== undefined) {
       body["parallel_tool_calls"] = opts.parallelToolCalls;
+    }
+    if (opts.toolChoice) {
+      body["tool_choice"] = {
+        type: "function",
+        function: { name: opts.toolChoice.name },
+      };
     }
     if (opts.reasoningEffort && opts.reasoningEffort !== "none") {
       body["reasoning_effort"] = opts.reasoningEffort;
@@ -329,6 +336,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       tools: [tool],
       reasoningEffort: "none",
       parallelToolCalls: false,
+      toolChoice: { type: "tool", name: toolName },
     });
     return parseStructuredJsonResult(choice, toolName) as T;
   }
@@ -354,6 +362,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
       tools: options.tools.map(toWireTool),
       parallelToolCalls: options.parallelToolCalls ?? false,
       reasoningEffort: reasoning,
+      toolChoice: options.toolChoice,
     });
     const data = await this.sendRequest(
       body,
