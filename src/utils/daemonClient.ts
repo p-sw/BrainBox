@@ -46,40 +46,51 @@ export async function sendToDaemon<
   return reply;
 }
 
+const RPC_TIMEOUT_MS = 15_000;
+
 function exchangeOnce<T>(payload: object): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const socket: Socket = connect(DAEMON_SOCKET_PATH);
-    let buf = "";
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      fn();
-    };
-    socket.on("data", (chunk) => {
-      buf += chunk.toString("utf8");
-      let idx = buf.indexOf("\n");
-      while (idx >= 0) {
-        const line = buf.slice(0, idx).trim();
-        buf = buf.slice(idx + 1);
-        idx = buf.indexOf("\n");
-        if (line.length === 0) continue;
-        try {
-          finish(() => resolve(JSON.parse(line) as T));
-        } catch (parseErr) {
-          logger.debug(
-            `exchangeOnce: invalid daemon reply: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
-          );
-          finish(() => reject(new Error("invalid response from daemon")));
-        }
-        return;
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  const socket: Socket = connect(DAEMON_SOCKET_PATH);
+  let buf = "";
+  let settled = false;
+  const finish = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    socket.destroy();
+    fn();
+  };
+  const timer = setTimeout(() => {
+    finish(() =>
+      reject(new Error(`daemon RPC timed out after ${RPC_TIMEOUT_MS}ms`)),
+    );
+  }, RPC_TIMEOUT_MS);
+  socket.on("data", (chunk) => {
+    buf += chunk.toString("utf8");
+    let idx = buf.indexOf("\n");
+    while (idx >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      idx = buf.indexOf("\n");
+      if (line.length === 0) continue;
+      try {
+        finish(() => resolve(JSON.parse(line) as T));
+      } catch (parseErr) {
+        logger.debug(
+          `exchangeOnce: invalid daemon reply: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+        );
+        finish(() => reject(new Error("invalid response from daemon")));
       }
-    });
-    socket.on("error", (err) => {
-      logger.debug(`exchangeOnce: socket error: ${err.message}`);
-      finish(() => reject(err));
-    });
-    socket.write(JSON.stringify(payload) + "\n");
+      return;
+    }
   });
+  socket.on("error", (err) => {
+    logger.debug(`exchangeOnce: socket error: ${err.message}`);
+    finish(() => reject(err));
+  });
+  socket.on("close", () => {
+    finish(() => reject(new Error("daemon closed connection without a reply")));
+  });
+  socket.write(JSON.stringify(payload) + "\n");
+  return promise;
 }
