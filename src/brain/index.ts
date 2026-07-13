@@ -714,11 +714,22 @@ export class Brain<BB extends BrainItem = BrainItem> {
   async getHistoryFacts(): Promise<string> {
     try {
       const docs = await this.memory.list();
-      const text = docs
+      // Schedules/persona JSON are not conversational facts.
+      const facts = docs.filter((d) => {
+        const id = d.customId ?? "";
+        return (
+          !id.startsWith("daily-schedule:") &&
+          !id.startsWith("monthly-schedule:") &&
+          id !== "persona"
+        );
+      });
+      const text = facts
         .map((d) => d.content)
         .slice(-30)
         .join("\n");
-      log.debug(`getHistoryFacts: ${docs.length} docs, ${text.length} chars`);
+      log.debug(
+        `getHistoryFacts: ${facts.length}/${docs.length} fact docs, ${text.length} chars`,
+      );
       return text;
     } catch (err) {
       log.debug(
