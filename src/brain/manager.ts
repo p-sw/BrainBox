@@ -20,6 +20,8 @@ export interface BrainItem {
   displayName: string;
   /** Primary chat language (e.g. "English", "Korean"). Missing on older brains. */
   language?: string;
+  /** Gender identity (e.g. "Female", "Male"). Missing on older brains. */
+  gender?: string;
   baseSystemPrompt: string;
   dndReplyProbability: number;
   startConversationCountThreshold: number;

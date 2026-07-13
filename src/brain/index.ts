@@ -524,6 +524,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
     const datetimeBlock = formatDatetime(now);
 
     const language = this.brainbase.language?.trim() || "English";
+    const gender = this.brainbase.gender?.trim() || "Unspecified";
     const instruction = initiate
       ? await loadPrompt("START_CONVERSATION")
       : await loadPrompt("SEND_MESSAGE");
@@ -531,6 +532,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       ? [
           `Current date and time: ${datetimeBlock}`,
           `Language: ${language}`,
+          `Gender: ${gender}`,
           scheduleBlock,
           memoryBlock,
           `Conversation so far:`,
@@ -540,6 +542,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       : [
           `Current date and time: ${datetimeBlock}`,
           `Language: ${language}`,
+          `Gender: ${gender}`,
           scheduleBlock,
           memoryBlock,
           `Conversation so far:`,
@@ -558,7 +561,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
     try {
       await llm.chatWithToolExecution(llm.models.conversation, {
         caller: initiate ? "start-conversation" : "send-message",
-        instruction: `${this.brainbase.baseSystemPrompt}\n\nLanguage: always reply in ${language}.\n\n${instruction}`,
+        instruction: `${this.brainbase.baseSystemPrompt}\n\nLanguage: always reply in ${language}.\nGender: you are ${gender}.\n\n${instruction}`,
         messages,
         tools,
         maxSteps,
@@ -818,6 +821,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
         spaceName: space.name,
         displayName,
         language,
+        gender,
         baseSystemPrompt,
         dndReplyProbability: generated.dndReplyProbability,
         startConversationCountThreshold:
