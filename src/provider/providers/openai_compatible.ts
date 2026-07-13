@@ -292,7 +292,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     });
     const data = await this.sendRequest(
       body,
-      options.reasoningEffort,
+      reasoning,
       resolveLlmCaller(options),
     );
     const choice = data.choices?.[0];
@@ -366,7 +366,7 @@ export class OpenAICompatibleExecutor extends LLMExecutor {
     });
     const data = await this.sendRequest(
       body,
-      options.reasoningEffort,
+      reasoning,
       resolveLlmCaller(options),
     );
     const choice = data.choices?.[0];
