@@ -130,8 +130,7 @@ function AddApp({
   // stage.kind === "extras"
   const nextField = stage.fields[0];
   if (!nextField) {
-    setProviderAuth(stage.provider, stage.values);
-    logger.success(`Saved ${stage.provider} to auth.yaml`);
+    // Should not render — extras onSubmit saves + onDone when remaining is empty.
     return <Text>Done.</Text>;
   }
   return (
@@ -147,6 +146,12 @@ function AddApp({
           const remaining = stage.fields.slice(1);
           const values: Record<string, string> = { ...stage.values };
           if (value) values[nextField] = value;
+          if (remaining.length === 0) {
+            setProviderAuth(stage.provider, values);
+            logger.success(`Saved ${stage.provider} to auth.yaml`);
+            onDone();
+            return;
+          }
           setStage({
             kind: "extras",
             provider: stage.provider,
