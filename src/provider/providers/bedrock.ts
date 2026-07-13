@@ -150,16 +150,22 @@ function toAnthropicMessages(messages: ChatMessages[]): {
       continue;
     }
     if (m.role === "tool") {
-      msgs.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: m.toolCallId,
-            content: [{ type: "text", text: m.content }],
-          },
-        ],
-      });
+      const block = {
+        type: "tool_result",
+        tool_use_id: m.toolCallId,
+        content: [{ type: "text", text: m.content }],
+      };
+      const last = msgs[msgs.length - 1];
+      if (
+        last &&
+        last["role"] === "user" &&
+        Array.isArray(last["content"]) &&
+        (last["content"] as Array<{ type?: string }>)[0]?.type === "tool_result"
+      ) {
+        (last["content"] as unknown[]).push(block);
+      } else {
+        msgs.push({ role: "user", content: [block] });
+      }
     }
   }
   return { system, msgs };
