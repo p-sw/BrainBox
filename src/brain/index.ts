@@ -754,11 +754,12 @@ export class Brain<BB extends BrainItem = BrainItem> {
   static async create(
     displayName: string,
     seed: string,
-    options: { language?: string } = {},
+    options: { language?: string; gender?: string } = {},
   ): Promise<{ brainId: string; brain: Brain } | { error: string }> {
     const language = (options.language ?? "English").trim() || "English";
+    const gender = (options.gender ?? "Unspecified").trim() || "Unspecified";
     log.debug(
-      `Brain.create: starting name="${displayName}" language="${language}"`,
+      `Brain.create: starting name="${displayName}" language="${language}" gender="${gender}"`,
     );
     try {
       const personaInitInstruction = await loadPrompt("PERSONA_INIT");
@@ -766,7 +767,12 @@ export class Brain<BB extends BrainItem = BrainItem> {
       const description = await llm.call<string>(llm.models.identity, {
         caller: "persona-init",
         instruction: personaInitInstruction,
-        message: [`Language: ${language}`, `Seed:`, seed].join("\n\n"),
+        message: [
+          `Language: ${language}`,
+          `Gender: ${gender}`,
+          `Seed:`,
+          seed,
+        ].join("\n\n"),
       });
       log.debug(
         `Brain.create: description returned (${description.length} chars)`,
@@ -783,6 +789,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
           instruction: personaSystemInstruction,
           message: [
             `Language: ${language}`,
+            `Gender: ${gender}`,
             `Biography:`,
             description,
           ].join("\n\n"),

@@ -54,9 +54,10 @@ export async function deactivateBrain(brainId: string): Promise<void> {
 export async function createBrain(
   displayName: string,
   seed: string | undefined,
-  options: { schedule: boolean; language: string },
+  options: { schedule: boolean; language: string; gender: string },
 ): Promise<void> {
   const language = options.language?.trim() || "English";
+  const gender = options.gender?.trim() || "Unspecified";
   const seedText = (seed ?? "").trim();
   if (!seedText) {
     logger.error(
@@ -66,9 +67,9 @@ export async function createBrain(
     return;
   }
   logger.debug(
-    `createBrain: name="${displayName}" language="${language}" seed length=${seedText.length} schedule=${options.schedule}`,
+    `createBrain: name="${displayName}" language="${language}" gender="${gender}" seed length=${seedText.length} schedule=${options.schedule}`,
   );
-  const result = await Brain.create(displayName, seedText, { language });
+  const result = await Brain.create(displayName, seedText, { language, gender });
   if ("error" in result) {
     logger.error(`Failed to create brain "${displayName}": ${result.error}`);
     process.exitCode = 1;
@@ -77,11 +78,11 @@ export async function createBrain(
   if (options.schedule) {
     await result.brain.regenerateSchedules();
     logger.success(
-      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) [${language}] with initial schedule`,
+      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) [${language}, ${gender}] with initial schedule`,
     );
   } else {
     logger.success(
-      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) [${language}]`,
+      `Created brain "${displayName}" (${chalk.cyan(result.brainId)}) [${language}, ${gender}]`,
     );
   }
 }
@@ -164,6 +165,11 @@ export function register(program: Command): Command {
       "-l, --language <language>",
       "Primary chat language for the persona",
       "English",
+    )
+    .option(
+      "-g, --gender <gender>",
+      "Gender for the persona (Female | Male | Non-binary | Unspecified)",
+      "Unspecified",
     )
     .action(createBrain);
   cmd

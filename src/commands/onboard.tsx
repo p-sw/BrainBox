@@ -220,7 +220,8 @@ function BrainApp({
   const [stage, setStage] = useState<
     | { kind: "name" }
     | { kind: "language"; displayName: string }
-    | { kind: "seed"; displayName: string; language: string }
+    | { kind: "gender"; displayName: string; language: string }
+    | { kind: "seed"; displayName: string; language: string; gender: string }
   >({ kind: "name" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -277,7 +278,7 @@ function BrainApp({
           onSelect={(language) => {
             setError(null);
             setStage({
-              kind: "seed",
+              kind: "gender",
               displayName: stage.displayName,
               language,
             });
@@ -288,12 +289,37 @@ function BrainApp({
     );
   }
 
+  if (stage.kind === "gender") {
+    return (
+      <Box flexDirection="column">
+        <Text>
+          {chalk.bold("Step 3/4")} — Gender for{" "}
+          <Text color="cyan">{stage.displayName}</Text>
+        </Text>
+        <Text dimColor>↑↓ to move, type to filter, enter to select</Text>
+        <Select
+          prompt="gender> "
+          items={["Female", "Male", "Non-binary", "Unspecified"]}
+          onSelect={(gender) => {
+            setError(null);
+            setStage({
+              kind: "seed",
+              displayName: stage.displayName,
+              language: stage.language,
+              gender,
+            });
+          }}
+        />
+        {error && <Text color="red">{error}</Text>}
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column">
       <Text>
         {chalk.bold("Step 3/4")} — Seed for{" "}
         <Text color="cyan">{stage.displayName}</Text>{" "}
-        <Text dimColor>({stage.language})</Text>
+        <Text dimColor>({stage.language}, {stage.gender})</Text>
       </Text>
       <Text dimColor>
         One sentence about who they are. The model will expand it.
@@ -321,6 +347,7 @@ function BrainApp({
             setError(null);
             void Brain.create(stage.displayName, seed, {
               language: stage.language,
+              gender: stage.gender,
             }).then((result) => {
               setBusy(false);
               if ("error" in result) {
