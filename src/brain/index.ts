@@ -182,13 +182,11 @@ export class Brain<BB extends BrainItem = BrainItem> {
   }
 
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
-    const year =
-      datetime.getMonth() === 11
-        ? datetime.getFullYear() + 1
-        : datetime.getFullYear();
-    const month = (datetime.getMonth() + 1) % 12;
+    // Use the caller's month as-is. regenerateSchedules already advances to next month.
+    const year = datetime.getFullYear();
+    const month = datetime.getMonth(); // 0-based
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const monthKey = `${year}-${pad2(month + 1)}`;
+    const monthKey = formatMonthKey(datetime);
     log.debug(`createMonthlySchedule: starting for ${monthKey}`);
     try {
       const existing = await this.memory.get(`monthly-schedule:${monthKey}`);
