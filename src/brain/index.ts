@@ -179,15 +179,18 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
   async regenerateSchedules(): Promise<void> {
     const today = new Date();
+    const thisMonthly = await this.createMonthlySchedule(today);
+
     const nextMonth = new Date(
       today.getFullYear(),
       today.getMonth() + 1,
       today.getDate(),
     );
-    const monthly = await this.createMonthlySchedule(nextMonth);
-    if (!monthly) {
+    await this.createMonthlySchedule(nextMonth);
+
+    if (!thisMonthly) {
       log.debug(
-        `regenerateSchedules: skip daily — monthly schedule generation failed`,
+        `regenerateSchedules: skip daily — this month's schedule generation failed`,
       );
       return;
     }
@@ -204,7 +207,6 @@ export class Brain<BB extends BrainItem = BrainItem> {
   }
 
   async createMonthlySchedule(datetime: Date): Promise<MonthlySchedule | null> {
-    // Use the caller's month as-is. regenerateSchedules already advances to next month.
     const year = datetime.getFullYear();
     const month = datetime.getMonth(); // 0-based
     const daysInMonth = new Date(year, month + 1, 0).getDate();
