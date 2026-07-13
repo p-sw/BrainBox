@@ -123,6 +123,9 @@ register("snowflake-cortex", SnowflakeCortexExecutor);
 
 // ponytail: lazy so bare `brainbox` (help/version) works without model config
 let _llm: LLMExecutor | undefined;
+export function resetLlm(): void {
+  _llm = undefined;
+}
 export const llm: LLMExecutor = new Proxy({} as LLMExecutor, {
   get(_t, prop) {
     _llm ??= LLMExecutor.init();
