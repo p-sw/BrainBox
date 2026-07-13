@@ -8,10 +8,9 @@
     "jsx": "react-jsx",
     "allowJs": true,
 
-    // Bundler mode
-    "baseUrl": ".",
+    // Bundler mode (baseUrl removed — hard error in TS 7)
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -30,6 +29,8 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
 
+    // Explicit @types (TS 6+/7 default is [] — keep bun globals)
     "types": ["bun"]
-  }
+  },
+  "include": ["./src"]
 }
