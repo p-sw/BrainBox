@@ -3,7 +3,9 @@ import { configFile } from "../loader";
 
 const RootConfigSchema = z.object({
   debug: z.boolean().default(false),
-  supermemory: z.object({ apiKey: z.string().default("") }),
+  supermemory: z
+    .object({ apiKey: z.string().default("") })
+    .default({ apiKey: "" }),
   conversationModel: z.string().default(""),
   identityModel: z.string().default(""),
 });
