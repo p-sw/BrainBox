@@ -2,7 +2,7 @@ import { dirname, join, resolve } from "path";
 import { z, ZodError } from "zod";
 import { homedir } from "os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { logger } from "@/utils/logger";
 
 export const brainboxRoot = process.env["BRAINBOX_ROOT_PATH"]
@@ -19,6 +19,8 @@ export interface ConfigFile<T> {
 export interface ConfigFileOptions<T> {
   schema: z.ZodType<T>;
   header?: string;
+  /** File mode for create/write (e.g. 0o600 for secrets). */
+  mode?: number;
 }
 
 export function configFile<T>(
@@ -26,6 +28,7 @@ export function configFile<T>(
   options: ConfigFileOptions<T>,
 ): ConfigFile<T> {
   const path = (): string => join(brainboxRoot, file);
+  const writeOpts = options.mode !== undefined ? { mode: options.mode } : {};
   const read = (): T => {
     const p = path();
     let raw: unknown;
@@ -38,7 +41,7 @@ export function configFile<T>(
         (options.header ? options.header + "\n" : "") +
         (defaults === undefined ? "" : stringifyYaml(defaults));
       mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, templateStr);
+      writeFileSync(p, templateStr, writeOpts);
       raw = defaults ?? {};
     }
     try {
@@ -59,7 +62,9 @@ export function configFile<T>(
   const write = (value: T): void => {
     const p = path();
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, stringifyYaml(value));
+    writeFileSync(p, stringifyYaml(value), writeOpts);
+    // writeFileSync mode only applies on create — force owner-only after rewrite.
+    if (options.mode !== undefined) chmodSync(p, options.mode);
   };
   const update = (fn: (current: T) => T): T => {
     const next = fn(read());

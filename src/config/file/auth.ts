@@ -60,7 +60,10 @@ const AuthSchema = z.record(
   z.object({ apiKey: z.string().default("") }).loose(),
 ) as z.ZodType<AuthFile>;
 
-const authCfg = configFile<AuthFile>("auth.yaml", { schema: AuthSchema });
+const authCfg = configFile<AuthFile>("auth.yaml", {
+  schema: AuthSchema,
+  mode: 0o600,
+});
 
 export const PROVIDER_EXTRA_FIELDS: Record<string, string[]> = {
   "cloudflare-gateway": ["accountId", "gatewayId"],
