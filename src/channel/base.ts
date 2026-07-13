@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { Brain } from "@/brain";
 import type { BrainItemWithChannel } from "@/brain/manager";
 import {
@@ -13,6 +14,7 @@ import { Cron, scheduledJobs, type CronCallback } from "croner";
 const MESSAGE_DEBOUNCE_MS = 1500;
 const IS_CHATTING_DEBOUNCE_MS = 1000 * 60 * 3; // 3m
 const DEFERRED_QUEUE_CAP = 1000;
+const PAIRING_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const AVAILABILITY_WATCHER_KEY = "__availability-watcher__";
 const AVAILABILITY_WATCHER_PATTERN = "*/5 * * * *";
 const SLEEP_MEMORY_CRON_KEY = "__sleep-memory__";
@@ -50,6 +52,7 @@ export interface PairingEntry {
   brainId: string;
   channelId?: string;
   chatId?: number;
+  expiresAt: number;
 }
 
 export interface PairingCompletionResult {
@@ -417,9 +420,15 @@ export abstract class BaseChannel<
     let out = "";
     for (let i = 0; i < 8; i++) {
       if (i === 4) out += "-";
-      out += hex[Math.floor(Math.random() * 16)];
+      out += hex[randomInt(16)];
     }
     return out;
+  }
+
+  private static pruneExpiredPairingCodes(now = Date.now()): void {
+    for (const [code, entry] of BaseChannel.pairingRegistry) {
+      if (entry.expiresAt <= now) BaseChannel.pairingRegistry.delete(code);
+    }
   }
 
   protected registerActive(): void {
@@ -589,11 +598,13 @@ export abstract class BaseChannel<
    * message event listener from each channel subclass.
    */
   protected async onPairing(inbound: PairingInbound): Promise<void> {
+    BaseChannel.pruneExpiredPairingCodes();
     const code = BaseChannel.generatePairingCode();
     BaseChannel.pairingRegistry.set(code, {
       brainId: this.brain.brainbase.brainId,
       channelId: inbound.channelId,
       chatId: inbound.chatId,
+      expiresAt: Date.now() + PAIRING_CODE_TTL_MS,
     });
     const displayName = this.brain.brainbase.displayName;
     const text = [
@@ -627,9 +638,11 @@ export abstract class BaseChannel<
   static async completePairingByCode(
     code: string,
   ): Promise<PairingCompletionResult> {
+    BaseChannel.pruneExpiredPairingCodes();
     const normalized = code.trim().toUpperCase();
     const entry = BaseChannel.pairingRegistry.get(normalized);
-    if (!entry) {
+    if (!entry || entry.expiresAt <= Date.now()) {
+      BaseChannel.pairingRegistry.delete(normalized);
       return { ok: false, error: "invalid or expired pairing code" };
     }
     const channel = BaseChannel.activeChannels.get(entry.brainId);
