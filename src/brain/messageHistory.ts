@@ -77,10 +77,11 @@ function formatTime(time: Date): string {
 export function translateMessageHistory(
   personaName: string,
   entries: ReadonlyArray<MessageHistoryEntry>,
+  userLabel = "User",
 ): string {
   return entries
     .map((entry) => {
-      const label = entry.sender === "persona" ? personaName : "사용자";
+      const label = entry.sender === "persona" ? personaName : userLabel;
       return `${label}@${formatTime(entry.time)}: ${entry.content}`;
     })
     .join("\n");

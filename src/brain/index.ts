@@ -45,6 +45,14 @@ function minutesInWindow(current: number, start: number, end: number): boolean {
   return current >= start || current < end;
 }
 
+/** Speaker label for the human in history transcripts. */
+function userSpeakerLabel(language?: string): string {
+  const lang = (language ?? "English").trim().toLowerCase();
+  if (lang.startsWith("ko") || lang.includes("korean") || lang.includes("한국"))
+    return "사용자";
+  return "User";
+}
+
 export interface BrainCreateResult {
   brain: Brain;
   description: string;
@@ -303,6 +311,7 @@ export class Brain<BB extends BrainItem = BrainItem> {
       const historyBlock = translateMessageHistory(
         this.brainbase.displayName,
         history,
+        userSpeakerLabel(this.brainbase.language),
       );
       const promptMessage = [
         `Date: ${dateKey}`,
@@ -499,13 +508,16 @@ export class Brain<BB extends BrainItem = BrainItem> {
 
     const replyMessages: string[] = [];
     const tools: ChatFunctionTool[] = buildSendMessageTools();
+    const userLabel = userSpeakerLabel(this.brainbase.language);
     const historyBlock = translateMessageHistory(
       this.brainbase.displayName,
       history,
+      userLabel,
     );
     const newBlock = translateMessageHistory(
       this.brainbase.displayName,
       newMessages,
+      userLabel,
     );
     const memoryBlock = await this.buildMemoryBlock();
     const scheduleBlock = await this.buildScheduleBlock(now);
