@@ -573,6 +573,16 @@ export class Brain<BB extends BrainItem = BrainItem> {
               call.function.arguments,
             );
             if (content !== null) {
+              if (/[\r\n]/.test(content)) {
+                log.debug(
+                  `sendMessage: addReplyMessage rejected (contains newline)`,
+                );
+                return JSON.stringify({
+                  ok: false,
+                  error:
+                    "content must not contain newlines. Send multiple short bubbles by calling addReplyMessage once per bubble instead.",
+                });
+              }
               log.debug(
                 `sendMessage: addReplyMessage[${replyMessages.length}] (${content.length} chars)`,
               );
@@ -907,12 +917,16 @@ function buildSendMessageTools(): ChatFunctionTool[] {
     {
       name: "addReplyMessage",
       description:
-        "Append one chat bubble to the reply stream. Call once per bubble you want to send. After at least one successful call, you may end your turn without calling stop.",
+        "Append one chat bubble to the reply stream. Call once per bubble you want to send. Do not put newlines in content — split into multiple calls instead. After at least one successful call, you may end your turn without calling stop.",
       parameters: {
         type: "object",
         additionalProperties: false,
         properties: {
-          content: { type: "string", description: "The bubble text." },
+          content: {
+            type: "string",
+            description:
+              "The bubble text. No newlines; use another call for the next bubble.",
+          },
         },
         required: ["content"],
       },
