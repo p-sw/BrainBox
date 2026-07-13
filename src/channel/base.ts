@@ -260,72 +260,77 @@ export abstract class BaseChannel<
       `onMessage: passing through (availability=${availability.status})`,
     );
 
-    if (!this.isSending) {
-      this.messageInQueue.push(message);
-      logger.debug(
-        `onMessage: queued (queueSize=${this.messageInQueue.length})`,
-      );
-      if (this.messageDebounce) clearTimeout(this.messageDebounce);
-      this.messageDebounce = setTimeout(async () => {
-        const newUserMessages = this.messageInQueue.splice(
-          0,
-          this.messageInQueue.length,
-        );
-        this.messageDebounce = null;
-        logger.debug(
-          `onMessage: debounce fired, dispatching ${newUserMessages.length} message(s)`,
-        );
-        const now = new Date();
-        const twoDaysAgo = new Date(now);
-        twoDaysAgo.setDate(now.getDate() - 2);
-        this.isSending = true;
-        try {
-          // History snapshot first so new user msgs aren't duplicated in the prompt.
-          const history = this.getMessageHistory(twoDaysAgo, now);
-          for (const m of newUserMessages) this.saveMessageHistory(m);
-          await this.brain.sendMessage(history, newUserMessages, {
-            send: this.sendAndRecord.bind(this),
-          });
-        } catch (e) {
-          logger.error(`Error while sending message: ${e}`);
-          logger.debug(
-            `onMessage: sendMessage threw — ${e instanceof Error ? e.stack : String(e)}`,
-          );
-        } finally {
-          this.isSending = false;
-
-          if (this.isSendingQueue.length > 0) {
-            const queueMessages = this.isSendingQueue.splice(
-              0,
-              this.isSendingQueue.length,
-            );
-            logger.debug(
-              `onMessage: draining ${queueMessages.length} queued message(s) from isSendingQueue`,
-            );
-            let lastMessage: MessageHistoryEntry | undefined = undefined;
-            while (!lastMessage && queueMessages.length > 0) {
-              lastMessage = queueMessages.splice(-1, 1)[0];
-            }
-            if (lastMessage) {
-              this.messageInQueue.push(...queueMessages);
-              void this.onMessage(lastMessage);
-            }
-          }
-        }
-      }, MESSAGE_DEBOUNCE_MS);
-    } else {
-      logger.debug(
-        `onMessage: isSending — buffering into isSendingQueue (size=${this.isSendingQueue.length + 1})`,
-      );
-      this.isSendingQueue.push(message);
-    }
+    this.enqueueForSend(message);
 
     this.isChatting = true;
-    if (this.isChattingDebounce) clearTimeout(this.isChattingDebounce);
+    clearTimeout(this.isChattingDebounce);
     this.isChattingDebounce = setTimeout(() => {
       this.isChatting = false;
       this.isChattingDebounce = null;
     }, IS_CHATTING_DEBOUNCE_MS);
+  }
+
+  /** Queue a message that already passed availability and arm the send debounce. */
+  private enqueueForSend(message: MessageHistoryEntry): void {
+    if (this.isSending) {
+      logger.debug(
+        `onMessage: isSending — buffering into isSendingQueue (size=${this.isSendingQueue.length + 1})`,
+      );
+      this.isSendingQueue.push(message);
+      return;
+    }
+    this.messageInQueue.push(message);
+    logger.debug(
+      `onMessage: queued (queueSize=${this.messageInQueue.length})`,
+    );
+    this.armMessageDebounce();
+  }
+
+  private armMessageDebounce(): void {
+    clearTimeout(this.messageDebounce);
+    this.messageDebounce = setTimeout(async () => {
+      const newUserMessages = this.messageInQueue.splice(
+        0,
+        this.messageInQueue.length,
+      );
+      this.messageDebounce = null;
+      if (newUserMessages.length === 0) return;
+      logger.debug(
+        `onMessage: debounce fired, dispatching ${newUserMessages.length} message(s)`,
+      );
+      const now = new Date();
+      const twoDaysAgo = new Date(now);
+      twoDaysAgo.setDate(now.getDate() - 2);
+      this.isSending = true;
+      try {
+        // History snapshot first so new user msgs aren't duplicated in the prompt.
+        const history = this.getMessageHistory(twoDaysAgo, now);
+        for (const m of newUserMessages) this.saveMessageHistory(m);
+        await this.brain.sendMessage(history, newUserMessages, {
+          send: this.sendAndRecord.bind(this),
+        });
+      } catch (e) {
+        logger.error(`Error while sending message: ${e}`);
+        logger.debug(
+          `onMessage: sendMessage threw — ${e instanceof Error ? e.stack : String(e)}`,
+        );
+      } finally {
+        this.isSending = false;
+        if (this.isSendingQueue.length > 0) {
+          const queueMessages = this.isSendingQueue.splice(
+            0,
+            this.isSendingQueue.length,
+          );
+          logger.debug(
+            `onMessage: draining ${queueMessages.length} queued message(s) from isSendingQueue`,
+          );
+          // ponytail: all drained msgs already passed availability at receipt;
+          // re-arm debounce so none are orphaned if a re-check would defer.
+          this.messageInQueue.push(...queueMessages);
+        }
+        if (this.messageInQueue.length > 0) this.armMessageDebounce();
+      }
+    }, MESSAGE_DEBOUNCE_MS);
   }
 
   /**
