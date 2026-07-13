@@ -6,6 +6,7 @@ import {
   type BrainItemTelegram,
 } from "@/brain/manager";
 import { Brain } from "@/brain";
+import { BaseChannel } from "@/channel/base";
 import { DiscordChannel } from "@/channel/discord";
 import { TelegramChannel } from "@/channel/telegram";
 import { logger, configureLlmLog } from "@/utils/logger";
@@ -116,17 +117,28 @@ async function listenOnSocket(): Promise<void> {
   });
 
   await new Promise<void>((resolve) => {
+    let shuttingDown = false;
     const shutdown = () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       logger.debug(`listenOnSocket: shutdown signal received`);
       for (const s of sockets) s.destroy();
-      server.close(() => {
-        try {
-          unlinkSync(SOCKET_PATH);
-        } catch {
-          // ignore
-        }
-        resolve();
-      });
+      // Tear down Discord/Telegram clients + crons before closing the socket.
+      void BaseChannel.shutdownAll()
+        .catch((err) => {
+          const reason = err instanceof Error ? err.message : String(err);
+          logger.error(`Channel shutdown failed: ${reason}`);
+        })
+        .finally(() => {
+          server.close(() => {
+            try {
+              unlinkSync(SOCKET_PATH);
+            } catch {
+              // ignore
+            }
+            resolve();
+          });
+        });
     };
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
