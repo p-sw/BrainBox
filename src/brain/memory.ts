@@ -39,21 +39,30 @@ export class Memory {
     customId: string,
   ): Promise<{ content: string; metadata: FactMetadata | null } | null> {
     log.debug(`get: customId=${customId}`);
-    const listed = await this.db.documents.list({
-      containerTags: [this.space.name],
-      limit: 200,
-    });
-    const match = (listed.memories ?? []).find((m) => m.customId === customId);
-    if (!match) {
-      log.debug(`get: miss for customId=${customId}`);
-      return null;
+    const limit = 100;
+    // ponytail: no get-by-customId API — page until found or exhausted.
+    for (let page = 1; page <= 50; page += 1) {
+      const listed = await this.db.documents.list({
+        containerTags: [this.space.name],
+        limit,
+        page,
+      });
+      const memories = listed.memories ?? [];
+      const match = memories.find((m) => m.customId === customId);
+      if (match) {
+        const full = await this.db.documents.get(match.id);
+        log.debug(
+          `get: hit customId=${customId} bytes=${full.content?.length ?? 0} page=${page}`,
+        );
+        return {
+          content: full.content ?? "",
+          metadata: (full.metadata ?? null) as FactMetadata | null,
+        };
+      }
+      if (memories.length < limit) break;
     }
-    const full = await this.db.documents.get(match.id);
-    log.debug(`get: hit customId=${customId} bytes=${full.content?.length ?? 0}`);
-    return {
-      content: full.content ?? "",
-      metadata: (full.metadata ?? null) as FactMetadata | null,
-    };
+    log.debug(`get: miss for customId=${customId}`);
+    return null;
   }
 
   async clear(): Promise<void> {
@@ -63,15 +72,21 @@ export class Memory {
   }
 
   async list(): Promise<Array<{ customId: string | null; content: string }>> {
-    log.debug(`list: fetching up to 200 docs in space=${this.space.name}`);
-    const listed = await this.db.documents.list({
-      containerTags: [this.space.name],
-      limit: 200,
-    });
-    const docs = (listed.memories ?? []).map((d) => ({
-      customId: d.customId,
-      content: d.content ?? "",
-    }));
+    log.debug(`list: paginating docs in space=${this.space.name}`);
+    const limit = 100;
+    const docs: Array<{ customId: string | null; content: string }> = [];
+    for (let page = 1; page <= 50; page += 1) {
+      const listed = await this.db.documents.list({
+        containerTags: [this.space.name],
+        limit,
+        page,
+      });
+      const memories = listed.memories ?? [];
+      for (const d of memories) {
+        docs.push({ customId: d.customId, content: d.content ?? "" });
+      }
+      if (memories.length < limit) break;
+    }
     log.debug(`list: got ${docs.length} docs`);
     return docs;
   }
